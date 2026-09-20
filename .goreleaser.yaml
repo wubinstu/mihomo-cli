@@ -1,0 +1,49 @@
+version: 2
+
+project_name: mihomo-cli
+
+builds:
+  - id: mihomo-cli
+    main: .
+    binary: mihomo-cli
+    ldflags:
+      - -s -w -X github.com/wubinstu/mihomo-cli/internal/cmd.Version={{.Version}}
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+      - arm
+      - "386"
+
+archives:
+  - formats: [tar.gz]
+    name_template: >-
+      {{ .ProjectName }}_{{ .Os }}_{{- if eq .Arch "amd64" }}x86_64{{- else if eq .Arch "arm64" }}aarch64{{- else }}{{ .Arch }}{{- end }}
+    files:
+      - none*
+
+nfpms:
+  - id: packages
+    package_name: mihomo-cli
+    file_name_template: >-
+      {{ .ProjectName }}_{{ .Os }}_{{- if eq .Arch "amd64" }}x86_64{{- else if eq .Arch "arm64" }}aarch64{{- else }}{{ .Arch }}{{- end }}
+    builds: [mihomo-cli]
+    formats: [deb, rpm]
+    maintainer: wubinstu <wubinastu@outlook.com>
+    description: CLI shell for the mihomo proxy core, designed for Linux servers
+    license: MIT
+    homepage: https://github.com/wubinstu/mihomo-cli
+    contents:
+      - src: mihomo-cli
+        dst: /usr/local/bin/mihomo-cli
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^chore:"
