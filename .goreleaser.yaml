@@ -33,9 +33,6 @@ nfpms:
     description: CLI shell for the mihomo proxy core, designed for Linux servers
     license: MIT
     homepage: https://github.com/wubinstu/mihomo-cli
-    contents:
-      - src: mihomo-cli
-        dst: /usr/local/bin/mihomo-cli
 
 checksum:
   name_template: "checksums.txt"
