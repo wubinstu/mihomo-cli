@@ -10,6 +10,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/wubinstu/mihomo-cli/internal/api"
+	"github.com/wubinstu/mihomo-cli/internal/app"
+	"github.com/wubinstu/mihomo-cli/internal/sysd"
 	"github.com/wubinstu/mihomo-cli/internal/ui"
 )
 
@@ -116,31 +118,96 @@ func resolveGroupArg(ps *api.ProxiesResp, arg string) *api.Proxy {
 	return nil
 }
 
+// groupID 返回分组在列表中的编号, 如 "group8"; 未找到返回 "group:-"
+func groupID(ps *api.ProxiesResp, name string) string {
+	for i, g := range orderedGroups(ps) {
+		if g.Name == name {
+			return fmt.Sprintf("group%d", i+1)
+		}
+	}
+	return "group:-"
+}
+
+// nodeID 返回节点在分组 All 中的编号, 如 "node6"; 未找到返回 "node:-"
+func nodeID(g *api.Proxy, name string) string {
+	for i, n := range g.All {
+		if n == name {
+			return fmt.Sprintf("node%d", i+1)
+		}
+	}
+	return "node:-"
+}
+
+// printChain 打印当前 sub->group->node 链路
+func printChain() {
+	s := mustSettings()
+	if s.Current() == nil {
+		fmt.Printf("%s\n", T("当前无生效订阅(sub 悬空), 代理未生效"))
+		return
+	}
+	sub := fmt.Sprintf("sub%d:%s", subIndex(s, s.Current().Name), s.Current().Name)
+	g, n := "group:-", "node:-"
+	if c := api.New(s); s.CurrentGroup != "" {
+		if ps, err := c.Proxies(); err == nil {
+			if gp := resolveGroupArg(ps, s.CurrentGroup); gp != nil {
+				g = groupID(ps, gp.Name) + ":" + gp.Name
+				if gp.Now != "" {
+					n = nodeID(gp, gp.Now) + ":" + gp.Now
+				}
+			}
+		}
+	}
+	fmt.Printf("%s %s → %s → %s\n", T("当前链路"), sub, g, n)
+	if s.CurrentGroup == "" {
+		fmt.Println(T("提示: 分组未选择, 可执行 mihomo-cli group use <id|名称>"))
+	}
+}
+
+func subIndex(s *app.Settings, name string) int {
+	for i := range s.Profiles {
+		if s.Profiles[i].Name == name {
+			return i + 1
+		}
+	}
+	return 1
+}
+
+var groupListCmd = &cobra.Command{
+	Use:   "list",
+	Short: T("查看代理分组列表 (索引别名 #1..#n)"),
+	RunE:  groupListRun,
+}
+
+func groupListRun(cmd *cobra.Command, args []string) error {
+	s := mustSettings()
+	if s.Current() == nil {
+		return fmt.Errorf("%s", T("没有可用订阅, 请先 mihomo-cli sub use <id|名称>"))
+	}
+	ps, err := api.New(s).Proxies()
+	if err != nil {
+		return err
+	}
+	rows := [][]string{{"", "#", T("分组"), T("类型"), T("当前节点"), T("节点数")}}
+	for i, g := range orderedGroups(ps) {
+		cur := ""
+		if g.Name == s.CurrentGroup {
+			cur = "*"
+		}
+		rows = append(rows, []string{
+			cur, strconv.Itoa(i + 1), g.Name, g.Type, g.Now, strconv.Itoa(len(g.All)),
+		})
+	}
+	ui.Table(os.Stdout, rows, 2)
+	if s.CurrentGroup == "" {
+		fmt.Println(T("未设置当前分组, 请先 mihomo-cli group use <id|名称>"))
+	}
+	return nil
+}
+
 var groupCmd = &cobra.Command{
 	Use:   "group",
 	Short: T("查看代理分组列表 (索引别名 #1..#n)"),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		s := mustSettings()
-		ps, err := api.New(s).Proxies()
-		if err != nil {
-			return err
-		}
-		rows := [][]string{{"", "#", T("分组"), T("类型"), T("当前节点"), T("节点数")}}
-		for i, g := range orderedGroups(ps) {
-			cur := ""
-			if g.Name == s.CurrentGroup {
-				cur = "*"
-			}
-			rows = append(rows, []string{
-				cur, strconv.Itoa(i + 1), g.Name, g.Type, g.Now, strconv.Itoa(len(g.All)),
-			})
-		}
-		ui.Table(os.Stdout, rows, 2)
-		if s.CurrentGroup == "" {
-			fmt.Println(T("未设置当前分组, 请先 mihomo-cli group use <id|名称>"))
-		}
-		return nil
-	},
+	RunE:  groupListRun,
 }
 
 var groupUseCmd = &cobra.Command{
@@ -149,6 +216,9 @@ var groupUseCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		s := mustSettings()
+		if s.Current() == nil {
+			return fmt.Errorf("%s", T("没有可用订阅, 请先 mihomo-cli sub use <id|名称>"))
+		}
 		ps, err := api.New(s).Proxies()
 		if err != nil {
 			return err
@@ -161,13 +231,44 @@ var groupUseCmd = &cobra.Command{
 		if err := s.Save(); err != nil {
 			return err
 		}
-		fmt.Printf("%s: [%s]\n", T("当前操作分组已切换为"), g.Name)
+		fmt.Printf("%s: [%s] (%s)\n", T("当前操作分组已切换为"), g.Name, groupID(ps, g.Name))
 		fmt.Printf("mihomo-cli node          # %s (%d)\n", T("节点"), len(g.All))
 		return nil
 	},
 }
 
+// groupUnuseCmd 取消当前分组: 分组切换为 DIRECT 直连, node 上下文悬空
+var groupUnuseCmd = &cobra.Command{
+	Use:   "unuse",
+	Short: T("取消当前分组选择: 该分组流量走 DIRECT 直连"),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		s := mustSettings()
+		if s.CurrentGroup == "" {
+			fmt.Println(T("当前分组已是悬空状态"))
+			return nil
+		}
+		if c := api.New(s); sysd.IsActive() {
+			if ps, err := c.Proxies(); err == nil {
+				if g := resolveGroupArg(ps, s.CurrentGroup); g != nil {
+					for _, n := range g.All {
+						if n == "DIRECT" {
+							_ = c.SetProxy(g.Name, "DIRECT")
+							break
+						}
+					}
+				}
+			}
+		}
+		s.CurrentGroup = ""
+		if err := s.Save(); err != nil {
+			return err
+		}
+		fmt.Println(T("已取消, 该分组流量走 DIRECT 直连"))
+		return nil
+	},
+}
+
 func init() {
-	groupCmd.AddCommand(groupUseCmd)
+	groupCmd.AddCommand(groupListCmd, groupUseCmd, groupUnuseCmd)
 	rootCmd.AddCommand(groupCmd)
 }

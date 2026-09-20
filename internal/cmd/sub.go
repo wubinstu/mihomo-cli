@@ -11,6 +11,7 @@ import (
 	"github.com/wubinstu/mihomo-cli/internal/app"
 	"github.com/wubinstu/mihomo-cli/internal/render"
 	"github.com/wubinstu/mihomo-cli/internal/subs"
+	"github.com/wubinstu/mihomo-cli/internal/sysd"
 	"github.com/wubinstu/mihomo-cli/internal/ui"
 )
 
@@ -18,7 +19,27 @@ var subAddName string
 
 var subCmd = &cobra.Command{
 	Use:   "sub",
-	Short: T("订阅管理: add/rm/list/update/use"),
+	Short: T("订阅管理: add/rm/list/update/use/unuse"),
+	RunE:  subListRun,
+}
+
+func subListRun(cmd *cobra.Command, args []string) error {
+	s := mustSettings()
+	rows := [][]string{{"#", "*", T("名称"), T("节点数"), T("更新时间"), "QUOTA", "URL"}}
+	for i := range s.Profiles {
+		p := &s.Profiles[i]
+		cur := ""
+		if p.Name == s.CurrentProfile {
+			cur = "*"
+		}
+		rows = append(rows, []string{
+			strconv.Itoa(i + 1), cur, p.Name, strconv.Itoa(p.Nodes),
+			humanTime(p.UpdatedAt),
+			shorten(p.UserInfo, 32), shorten(p.URL, 40),
+		})
+	}
+	ui.Table(os.Stdout, rows, 2)
+	return nil
 }
 
 var subAddCmd = &cobra.Command{
@@ -31,7 +52,12 @@ var subAddCmd = &cobra.Command{
 			return err
 		}
 		fmt.Printf("%s [%s] %s\n", T("订阅"), subs.Sanitize(subAddName), T("已添加并生效"))
-		return render.Generate(s)
+		if err := render.Generate(s); err != nil {
+			return err
+		}
+		reloadIfActive(s)
+		printChain()
+		return nil
 	},
 }
 
@@ -62,24 +88,7 @@ var subRmCmd = &cobra.Command{
 var subListCmd = &cobra.Command{
 	Use:   "list",
 	Short: T("列出全部订阅"),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		s := mustSettings()
-		rows := [][]string{{"#", "*", T("名称"), T("节点数"), T("更新时间"), "QUOTA", "URL"}}
-		for i := range s.Profiles {
-			p := &s.Profiles[i]
-			cur := ""
-			if p.Name == s.CurrentProfile {
-				cur = "*"
-			}
-			rows = append(rows, []string{
-				strconv.Itoa(i + 1), cur, p.Name, strconv.Itoa(p.Nodes),
-				humanTime(p.UpdatedAt),
-				shorten(p.UserInfo, 32), shorten(p.URL, 40),
-			})
-		}
-		ui.Table(os.Stdout, rows, 2)
-		return nil
-	},
+	RunE:  subListRun,
 }
 
 var subUpdateCmd = &cobra.Command{
@@ -105,6 +114,7 @@ var subUpdateCmd = &cobra.Command{
 			return err
 		}
 		reloadIfActive(s)
+		printChain()
 		return nil
 	},
 }
@@ -130,6 +140,32 @@ var subUseCmd = &cobra.Command{
 		}
 		reloadIfActive(s)
 		fmt.Printf("%s [%s]\n", T("当前订阅已切换为"), p.Name)
+		printChain()
+		return nil
+	},
+}
+
+// subUnuseCmd 取消当前订阅: 停止代理服务(网络不再被代理), group/node 级联悬空
+var subUnuseCmd = &cobra.Command{
+	Use:   "unuse",
+	Short: T("取消当前订阅: 停止代理服务, group/node 级联悬空"),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		s := mustSettings()
+		if s.CurrentProfile == "" && s.Current() == nil {
+			fmt.Println(T("当前订阅已是悬空状态"))
+			return nil
+		}
+		s.CurrentProfile = ""
+		s.CurrentGroup = ""
+		if err := s.Save(); err != nil {
+			return err
+		}
+		if sysd.IsActive() {
+			if err := sysd.Service("stop"); err != nil {
+				return err
+			}
+		}
+		fmt.Println(T("代理服务已停止, 网络不再被代理"))
 		return nil
 	},
 }
@@ -161,6 +197,6 @@ func humanTime(t time.Time) string {
 
 func init() {
 	subAddCmd.Flags().StringVarP(&subAddName, "name", "n", "default", T("订阅名称"))
-	subCmd.AddCommand(subAddCmd, subRmCmd, subListCmd, subUpdateCmd, subUseCmd)
+	subCmd.AddCommand(subAddCmd, subRmCmd, subListCmd, subUpdateCmd, subUseCmd, subUnuseCmd)
 	rootCmd.AddCommand(subCmd)
 }

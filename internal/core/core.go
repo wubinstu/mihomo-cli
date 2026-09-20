@@ -71,7 +71,8 @@ func Latest(proxy string) (*Release, error) {
 	return nil, fmt.Errorf("访问 GitHub 失败: %w", err)
 }
 
-func tagFromRedirect(hc *http.Client) string {
+// LatestTag 通过 releases/latest 重定向解析仓库最新 tag (不依赖 API 限额)
+func LatestTag(hc *http.Client, repo string) string {
 	client := *hc
 	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 		if len(via) >= 3 {
@@ -79,14 +80,13 @@ func tagFromRedirect(hc *http.Client) string {
 		}
 		return nil
 	}
-	req, _ := http.NewRequest("GET", "https://github.com/MetaCubeX/mihomo/releases/latest", nil)
+	req, _ := http.NewRequest("GET", "https://github.com/"+repo+"/releases/latest", nil)
 	req.Header.Set("User-Agent", "mihomo-cli")
 	resp, err := client.Do(req)
 	if err != nil {
 		return ""
 	}
 	defer resp.Body.Close()
-	// 未跟随跳转时从 Location 解析; 已跟随则看最终 URL
 	loc := resp.Header.Get("Location")
 	if loc == "" {
 		loc = resp.Request.URL.String()
@@ -95,6 +95,10 @@ func tagFromRedirect(hc *http.Client) string {
 		return loc[i+5:]
 	}
 	return ""
+}
+
+func tagFromRedirect(hc *http.Client) string {
+	return LatestTag(hc, "MetaCubeX/mihomo")
 }
 
 // DownloadInstall 下载指定 tag 的内核并安装到 CoreBin, 旧版本备份为 mihomo.old

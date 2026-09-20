@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -64,6 +65,9 @@ var nodeCmd = &cobra.Command{
 	Short: T("列出当前分组的节点 (索引别名 #1..#n)"),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		s := mustSettings()
+		if s.Current() == nil {
+			return fmt.Errorf("%s", T("没有可用订阅, 请先 mihomo-cli sub use <id|名称>"))
+		}
 		c := api.New(s)
 		ps, err := c.Proxies()
 		if err != nil {
@@ -93,8 +97,8 @@ var nodeCmd = &cobra.Command{
 	},
 }
 
-var nodeSetCmd = &cobra.Command{
-	Use:   "set <id|名称>",
+var nodeUseCmd = &cobra.Command{
+	Use:   "use <id|名称>",
 	Short: T("切换当前分组到指定节点"),
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -120,8 +124,38 @@ var nodeSetCmd = &cobra.Command{
 		}
 		fmt.Printf(T("[%s] %s -> %s")+"\n", g.Name, g.Now, node)
 		if s.ProxyAutoSelectEnabled {
-			fmt.Fprintln(os.Stderr, T("手动切换成功。注意: 自动择优已开启, 下次定时任务可能覆盖此设置"))
+			fmt.Fprintf(os.Stderr, "\x1b[33m%s\x1b[0m\n",
+				T("注意: 自动择优已开启, 下次定时任务可能覆盖此设置"))
 		}
+		return nil
+	},
+}
+
+// nodeUnuseCmd 取消当前节点: 分组切换为 DIRECT 直连
+var nodeUnuseCmd = &cobra.Command{
+	Use:   "unuse",
+	Short: T("取消当前节点选择: 分组流量走 DIRECT 直连"),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		s := mustSettings()
+		g, err := workingGroup(api.New(s), nodeGroupFlag)
+		if err != nil {
+			return err
+		}
+		found := false
+		for _, n := range g.All {
+			if n == "DIRECT" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("%s: %s (DIRECT %s)", T("取消失败"), g.Name, T("不在该分组中"))
+		}
+		c := api.New(s)
+		if err := c.SetProxy(g.Name, "DIRECT"); err != nil {
+			return err
+		}
+		fmt.Println(T("已取消, 分组流量走 DIRECT 直连"))
 		return nil
 	},
 }
@@ -162,93 +196,70 @@ var nodeTestCmd = &cobra.Command{
 	},
 }
 
+// nodeAutoCmd 仅作用于当前操作分组 (sub->group 链路) 的择优; 定时任务复用此命令
 var nodeAutoCmd = &cobra.Command{
-	Use:   "auto [id|名称]",
-	Short: T("对分组测速并切换到延迟最低的节点"),
-	Long: `定时任务调用形式 (mihomo-cli-auto.timer):
-  未指定分组时: 使用 proxy-auto-select-group 设置; 也为空则对全部含真实节点的分组择优
-仅在真实节点(排除子分组/DIRECT/REJECT)中择优, 策略组自动跳过。`,
+	Use:   "auto",
+	Short: T("对当前分组测速并切换到延迟最低的节点"),
+	Long: `仅在当前 use 的分组 (sub->group 链路) 内, 于真实节点(排除子分组/DIRECT/REJECT)中
+选择延迟最低者切换。定时任务 (proxy-auto-select-enabled) 周期性执行本命令。
+未设置当前分组时跳过 (group use <id|名称>)。`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		s := mustSettings()
 		c := api.New(s)
-		ps, err := c.Proxies()
+		g, err := workingGroup(c, nodeGroupFlag)
 		if err != nil {
-			return err
+			fmt.Fprintf(os.Stderr, "%s\n", T("无当前分组, 跳过自动择优 (mihomo-cli group use <id|名称>)"))
+			return nil
 		}
-		// 目标分组
-		var groups []string
-		switch {
-		case len(args) > 0:
-			if g := resolveGroupArg(ps, args[0]); g != nil {
-				groups = []string{g.Name}
-			}
-		case nodeGroupFlag != "":
-			if g := resolveGroupArg(ps, nodeGroupFlag); g != nil {
-				groups = []string{g.Name}
-			}
-		case s.ProxyAutoSelectGroup != "":
-			if g := resolveGroupArg(ps, s.ProxyAutoSelectGroup); g != nil {
-				groups = []string{g.Name}
-			}
-		default:
-			for _, g := range orderedGroups(ps) {
-				if g.Type == "Selector" && countRealNodes(ps.Proxies, g) > 0 {
-					groups = append(groups, g.Name)
-				}
-			}
+		if g.Type != "Selector" || countRealNodes(nil2map(c), *g) == 0 {
+			fmt.Fprintf(os.Stderr, "%s [%s] (%s)\n", T("跳过"), g.Name, T("无真实节点, 策略组"))
+			return nil
 		}
-		if len(groups) == 0 {
-			return fmt.Errorf("%s", T("没有 Selector 分组"))
+		delay, err := c.GroupDelay(g.Name, s.TestURL, s.TestTimeout)
+		if err != nil {
+			return fmt.Errorf("%s: %w", T("测速失败"), err)
 		}
-		failed := 0
-		for _, gname := range groups {
-			gp := ps.Proxies[gname]
-			if gp.Type != "Selector" || countRealNodes(ps.Proxies, gp) == 0 {
-				fmt.Printf("%s [%s] (%s)\n", T("跳过"), gname, T("无真实节点, 策略组"))
+		ps, _ := c.Proxies()
+		best, bestD := "", math.MaxInt
+		for n, d := range delay {
+			if d <= 0 || d >= bestD {
 				continue
 			}
-			delay, err := c.GroupDelay(gname, s.TestURL, s.TestTimeout)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "[%s] %s: %v\n", gname, T("测速失败"), err)
-				failed++
-				continue
-			}
-			best, bestD := "", math.MaxInt
-			for n, d := range delay {
-				if d <= 0 || d >= bestD {
-					continue
-				}
+			if ps != nil {
 				if p, ok := ps.Proxies[n]; ok && groupType(p) {
 					continue // 子分组不参与择优
 				}
-				if isDirectish(n) {
-					continue
-				}
-				best, bestD = n, d
 			}
-			if best == "" {
-				fmt.Fprintf(os.Stderr, "[%s] %s\n", gname, T("全部节点不可用"))
-				failed++
+			if isDirectish(n) {
 				continue
 			}
-			if err := c.SetProxy(gname, best); err != nil {
-				fmt.Fprintf(os.Stderr, "[%s] %s: %v\n", gname, T("切换失败"), err)
-				failed++
-				continue
-			}
-			fmt.Printf(ui.ColorDelay(bestD)+" [%s] -> %s\n", gname, best)
+			best, bestD = n, d
 		}
-		if failed > 0 {
-			return fmt.Errorf("%d %s", failed, T("切换失败"))
+		if best == "" {
+			return fmt.Errorf("[%s] %s", g.Name, T("全部节点不可用"))
 		}
+		if err := c.SetProxy(g.Name, best); err != nil {
+			return err
+		}
+		s.AutoSelectLastRun = time.Now()
+		_ = s.Save()
+		fmt.Printf(ui.ColorDelay(bestD)+" [%s] -> %s (%s)\n", g.Name, best, nodeID(g, best))
 		return nil
 	},
 }
 
+func nil2map(c *api.Client) map[string]api.Proxy {
+	if ps, err := c.Proxies(); err == nil {
+		return ps.Proxies
+	}
+	return map[string]api.Proxy{}
+}
+
+
 func init() {
-	for _, sub := range []*cobra.Command{nodeCmd, nodeSetCmd, nodeTestCmd, nodeAutoCmd} {
+	for _, sub := range []*cobra.Command{nodeCmd, nodeUseCmd, nodeUnuseCmd, nodeTestCmd, nodeAutoCmd} {
 		sub.Flags().StringVarP(&nodeGroupFlag, "group", "g", "", T("分组")+" (id|名称)")
 	}
-	nodeCmd.AddCommand(nodeSetCmd, nodeTestCmd, nodeAutoCmd)
+	nodeCmd.AddCommand(nodeUseCmd, nodeUnuseCmd, nodeTestCmd, nodeAutoCmd)
 	rootCmd.AddCommand(nodeCmd)
 }

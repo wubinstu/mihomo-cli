@@ -92,7 +92,7 @@ func Add(s *app.Settings, name, rawurl string) error {
 	if err := app.EnsureDirs(); err != nil {
 		return err
 	}
-	if err := os.WriteFile(Path(name), data, 0o600); err != nil {
+	if err := os.WriteFile(Path(name), data, 0o644); err != nil {
 		return err
 	}
 	s.Profiles = append(s.Profiles, app.Profile{

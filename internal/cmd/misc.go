@@ -166,9 +166,8 @@ var doctorCmd = &cobra.Command{
 		fmt.Printf("%s %-14s %s (%s %s)\n", ok(subOn == s.SubAutoUpdateEnabled),
 			T("订阅自动更新"), onOff(subOn), T("周期"), s.SubAutoUpdateInterval)
 		autoOn := sysd.TimerEnabled("mihomo-cli-auto.timer")
-		fmt.Printf("%s %-14s %s (%s %s, %s %s)\n", ok(autoOn == s.ProxyAutoSelectEnabled),
-			T("自动择优节点"), onOff(autoOn), T("周期"), s.ProxyAutoSelectInterval,
-			T("分组"), orDash(s.ProxyAutoSelectGroup, nil))
+		fmt.Printf("%s %-14s %s (%s %s)\n", ok(autoOn == s.ProxyAutoSelectEnabled),
+			T("自动择优节点"), onOff(autoOn), T("周期"), s.ProxyAutoSelectInterval)
 		fmt.Println(T("提示: 使用 curl -I https://www.google.com 验证代理是否生效 (先 eval $(mihomo-cli proxy on))"))
 		return nil
 	},
@@ -218,9 +217,8 @@ mixed-port <port>                ` + T("混合代理端口 (默认 7890)") + `
 proxy-mode <rule|global|direct>  ` + T("代理模式 (热切换)") + `
 sub-auto-update-enabled <bool>   ` + T("订阅自动更新开关") + `
 sub-auto-update-interval <dur>   ` + T("订阅自动更新周期") + `, 如 12h / 30m
-proxy-auto-select-enabled <bool>   ` + T("自动切换到最低延迟节点") + `
+proxy-auto-select-enabled <bool>   ` + T("自动切换到最低延迟节点") + ` (作用于当前分组)
 proxy-auto-select-interval <dur>   ` + T("自动择优周期") + `, 如 15m
-proxy-auto-select-group <id|名称>   ` + T("自动择优作用的分组") + ` (` + T("空=全部含真实节点的分组") + `)
 test-url <url>                   ` + T("测速 URL") + `
 test-timeout <ms>                ` + T("测速超时(毫秒)") + `
 download-proxy <url>             ` + T("下载内核/订阅使用的代理 (空=直连)") + `
@@ -240,8 +238,6 @@ download-proxy <url>             ` + T("下载内核/订阅使用的代理 (空=
 			k = "proxy-auto-select-enabled"
 		case "auto-interval":
 			k = "proxy-auto-select-interval"
-		case "auto-groups":
-			k = "proxy-auto-select-group"
 		}
 		b := func() bool {
 			return v == "true" || v == "on" || v == "yes" || v == "1"
@@ -282,8 +278,6 @@ download-proxy <url>             ` + T("下载内核/订阅使用的代理 (空=
 				return fmt.Errorf("%s", T("无效周期 (>=1m), 如 15m"))
 			}
 			s.ProxyAutoSelectInterval = d
-		case "proxy-auto-select-group":
-			s.ProxyAutoSelectGroup = v
 		case "test-url":
 			s.TestURL = v
 		case "test-timeout":
@@ -344,7 +338,6 @@ var getCmd = &cobra.Command{
 			{"sub-auto-update-interval", s.SubAutoUpdateInterval.String()},
 			{"proxy-auto-select-enabled", fmt.Sprintf("%v", s.ProxyAutoSelectEnabled)},
 			{"proxy-auto-select-interval", s.ProxyAutoSelectInterval.String()},
-			{"proxy-auto-select-group", s.ProxyAutoSelectGroup},
 			{"test-url", s.TestURL},
 			{"test-timeout", fmt.Sprintf("%dms", s.TestTimeout)},
 			{"download-proxy", s.DownloadProxy},

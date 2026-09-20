@@ -171,6 +171,21 @@ func (c *Client) SetMode(mode string) error {
 	return nil
 }
 
+// LastDelay 取节点最近一次历史延迟 (ms), 无历史返回 -1
+func (c *Client) LastDelay(name string) int {
+	var p struct {
+		Extra struct {
+			History []struct {
+				Delay int `json:"delay"`
+			} `json:"history"`
+		} `json:"extra"`
+	}
+	if err := c.GetJSON("/proxies/"+url.PathEscape(name), &p); err != nil || len(p.Extra.History) == 0 {
+		return -1
+	}
+	return p.Extra.History[len(p.Extra.History)-1].Delay
+}
+
 // ConfigMode 读取内核当前代理模式
 func (c *Client) ConfigMode() (string, error) {
 	var cfg struct {

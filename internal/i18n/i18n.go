@@ -210,6 +210,33 @@ var en = map[string]string{
 	"升级内核:":                    "upgrading core:",
 	"内核未安装, 请先执行 mihomo-cli install": "core not installed, run mihomo-cli install",
 
+	// ---- update / unuse / chain ----
+	"更新 mihomo-cli 自身 (从 GitHub Releases)": "update mihomo-cli itself (from GitHub Releases)",
+	"已是最新版本":                   "already the latest version",
+	"升级":                        "upgrading",
+	"已安装":                       "installed",
+	"安装包中未找到二进制":               "binary not found in package",
+	"访问失败":                      "failed to reach",
+	"当前无生效订阅(sub 悬空), 代理未生效":    "no active profile (sub unused), proxy inactive",
+	"当前链路":                      "Chain",
+	"提示: 分组未选择, 可执行 mihomo-cli group use <id|名称>": "hint: no group selected, run mihomo-cli group use <id|name>",
+	"没有可用订阅, 请先 mihomo-cli sub use <id|名称>": "no subscription, run mihomo-cli sub use <id|name> first",
+	"当前分组已是悬空状态":               "current group is already unused",
+	"已取消, 该分组流量走 DIRECT 直连":     "unused; traffic of this group goes DIRECT",
+	"取消当前分组选择: 该分组流量走 DIRECT 直连": "unset current group: its traffic goes DIRECT",
+	"取消当前节点选择: 分组流量走 DIRECT 直连":  "unset current node: group traffic goes DIRECT",
+	"已取消, 分组流量走 DIRECT 直连":      "unused; group traffic goes DIRECT",
+	"取消失败":                      "unuse failed",
+	"取消当前订阅: 停止代理服务, group/node 级联悬空": "unset current sub: stops service, cascades group/node to unused",
+	"当前订阅已是悬空状态":               "current profile is already unused",
+	"代理服务已停止, 网络不再被代理":          "proxy service stopped; traffic is no longer proxied",
+	"悬空 (sub unuse)":            "unused (sub unuse)",
+	"节点自动择优":                    "Node auto-select",
+	"上次":                        "last",
+	"下次":                        "next",
+	"无当前分组, 跳过自动择优 (mihomo-cli group use <id|名称>)": "no current group, auto-select skipped (mihomo-cli group use <id|name>)",
+	"对当前分组测速并切换到延迟最低的节点":         "test and switch to the lowest-latency node of the current group",
+
 	// ---- proxy on/off ----
 	"服务未运行, 已自动启动":             "service was not running, started automatically",
 

@@ -38,10 +38,10 @@ type Settings struct {
 	SubAutoUpdateEnabled  bool          `toml:"sub_auto_update_enabled"`
 	SubAutoUpdateInterval time.Duration `toml:"sub_auto_update_interval"`
 
-	// 自动测速并切换到最低延迟节点
+	// 自动测速并切换到最低延迟节点 (作用于当前 use 的分组)
 	ProxyAutoSelectEnabled  bool          `toml:"proxy_auto_select_enabled"`
 	ProxyAutoSelectInterval time.Duration `toml:"proxy_auto_select_interval"`
-	ProxyAutoSelectGroup    string        `toml:"proxy_auto_select_group"` // 空 = 所有含真实节点的分组
+	AutoSelectLastRun       time.Time     `toml:"auto_select_last_run,omitempty"`
 
 	TestURL     string `toml:"test_url"`
 	TestTimeout int    `toml:"test_timeout_ms"`
@@ -110,7 +110,7 @@ func (s *Settings) Save() error {
 	if err := EnsureDirs(); err != nil {
 		return err
 	}
-	f, err := os.OpenFile(SettingsFile, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	f, err := os.OpenFile(SettingsFile, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
 	if err != nil {
 		return err
 	}
