@@ -11,7 +11,9 @@
 ```
 
 - **系统级部署**: 服务端(内核)/客户端(CLI)/配置(`/etc/mihomo-cli`)全机共享;
-  多用户共用同一套代理, 无需重复设置。管理命令需 `sudo`, 查询命令所有用户可用。
+  多用户共用同一套代理, 无需重复设置。`install`/`uninstall` 需要 root
+  (install 后配置目录属主自动交给发起安装的 sudo 用户, 该用户日常管理无需再 sudo);
+  查询/切换命令所有用户可用。
 - CLI 通过 systemd 托管内核子进程, 经 `external-controller` API (仅 127.0.0.1 + 随机 secret) 控制。
 - 旧版用户目录 `~/.config/mihomo-cli` 会在 root 运行时自动迁移到 `/etc/mihomo-cli`。
 
@@ -46,12 +48,13 @@ mihomo-cli run                          前台运行(调试)
 mihomo-cli update                       更新 mihomo-cli 自身 (别名 upgrade)
 
 mihomo-cli sub                          订阅列表 (= sub list)
-mihomo-cli sub add|rm|update|use|unuse  订阅管理 (支持 #id)
+mihomo-cli sub add|rm|rename|update     订阅管理 (支持 #id)
+mihomo-cli sub use|unuse                选择/悬空订阅
 
 mihomo-cli group                        分组列表 (= group list)
 mihomo-cli group use|unuse              选择/取消当前操作分组
 
-mihomo-cli node                         当前分组的节点列表
+mihomo-cli node                         当前分组的节点列表 (= node list)
 mihomo-cli node use|unuse               选择/取消节点 (unuse=直连)
 mihomo-cli node test                    节点测速 (彩色: 绿<200 蓝<500 黄<3000 红, 灰=超时)
 mihomo-cli node auto                    对当前分组择优一次 (定时任务复用)
@@ -65,6 +68,8 @@ mihomo-cli doctor                       体检
 mihomo-cli get/set [key]                查看/修改设置
 mihomo-cli uninstall [--purge]          卸载
 ```
+
+sub/group/node 三层列表均以第一列 `*` 标记当前 use 选中项。
 
 推荐 alias（加到 `~/.bashrc`）:
 

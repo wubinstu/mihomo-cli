@@ -40,6 +40,9 @@ var installCmd = &cobra.Command{
 	Use:   "install",
 	Short: T("安装 mihomo 内核并注册 systemd 服务"),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if os.Geteuid() != 0 {
+			return fmt.Errorf("%s (sudo mihomo-cli install)", T("安装需要 root 权限: 配置目录 /etc/mihomo-cli 与 systemd 单元"))
+		}
 		s, err := app.LoadSettings()
 		if err != nil {
 			return err
@@ -94,6 +97,11 @@ var installCmd = &cobra.Command{
 		}
 		installCompletions()
 
+		// 配置目录属主交给发起安装的用户 (sudo 调用), 该用户后续无需 sudo 即可管理
+		if u := os.Getenv("SUDO_USER"); u != "" && u != "root" {
+			_ = exec.Command("chown", "-R", u+":", app.BaseDir).Run()
+		}
+
 		fmt.Printf("\n%s\n", T("安装完成。后续步骤:"))
 		steps := []string{
 			"mihomo-cli init                # " + T("添加订阅"),
@@ -114,6 +122,9 @@ var uninstallCmd = &cobra.Command{
 	Use:   "uninstall",
 	Short: T("卸载服务与单元文件 (--purge 同时删除配置/订阅/内核)"),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if os.Geteuid() != 0 {
+			return fmt.Errorf("%s (sudo mihomo-cli uninstall)", T("安装需要 root 权限: 配置目录 /etc/mihomo-cli 与 systemd 单元"))
+		}
 		fmt.Println(T("停止并移除 systemd 单元 ..."))
 		sysd.RemoveAll()
 		removeCompletions()

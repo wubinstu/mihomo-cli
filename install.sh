@@ -13,6 +13,12 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+# 系统级配置 (/etc/mihomo-cli) 与 systemd 单元需要 root
+if [ "$(id -u)" != 0 ]; then
+  echo ">> 需要 root, 尝试 sudo 重新执行 ..."
+  exec sudo bash "$0" "$@"
+fi
+
 ARCH=$(uname -m)
 case "$ARCH" in
   x86_64)  ARCH2="x86_64";;

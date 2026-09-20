@@ -221,24 +221,11 @@ proxy-auto-select-enabled <bool>   ` + T("自动切换到最低延迟节点") + 
 proxy-auto-select-interval <dur>   ` + T("自动择优周期") + `, 如 15m
 test-url <url>                   ` + T("测速 URL") + `
 test-timeout <ms>                ` + T("测速超时(毫秒)") + `
-download-proxy <url>             ` + T("下载内核/订阅使用的代理 (空=直连)") + `
-
-` + T("旧键名 auto-select-* / sub-auto-update / sub-interval 仍被接受。"),
+download-proxy <url>             ` + T("下载内核/订阅使用的代理 (空=直连)"),
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		s := mustSettings()
 		k, v := args[0], args[1]
-		// 兼容旧键名
-		switch k {
-		case "sub-auto-update":
-			k = "sub-auto-update-enabled"
-		case "sub-interval":
-			k = "sub-auto-update-interval"
-		case "auto-select":
-			k = "proxy-auto-select-enabled"
-		case "auto-interval":
-			k = "proxy-auto-select-interval"
-		}
 		b := func() bool {
 			return v == "true" || v == "on" || v == "yes" || v == "1"
 		}

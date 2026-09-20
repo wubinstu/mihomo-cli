@@ -12,6 +12,7 @@ import (
 
 	"github.com/wubinstu/mihomo-cli/internal/app"
 	"github.com/wubinstu/mihomo-cli/internal/core"
+	"github.com/wubinstu/mihomo-cli/internal/i18n"
 	"gopkg.in/yaml.v3"
 )
 
@@ -40,11 +41,11 @@ func Download(rawurl, proxy string) ([]byte, string, error) {
 	req.Header.Set("User-Agent", "clash.meta/mihomo-cli")
 	resp, err := core.HTTPClient(proxy).Do(req)
 	if err != nil {
-		return nil, "", fmt.Errorf("下载订阅失败: %w", err)
+		return nil, "", fmt.Errorf("%s: %w", i18n.T("下载订阅失败"), err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
-		return nil, "", fmt.Errorf("订阅服务器返回 %d", resp.StatusCode)
+		return nil, "", fmt.Errorf("%s %d", i18n.T("订阅服务器返回"), resp.StatusCode)
 	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, 64<<20))
 	if err != nil {
@@ -52,7 +53,7 @@ func Download(rawurl, proxy string) ([]byte, string, error) {
 	}
 	info := resp.Header.Get("subscription-userinfo")
 	if !looksLikeYAML(data) {
-		return nil, info, fmt.Errorf("订阅内容不是 clash yaml 格式(可能需要 UA 或链接失效)")
+		return nil, info, fmt.Errorf("%s (%s)", i18n.T("订阅内容不是 clash yaml 格式"), i18n.T("可能需要 UA 或链接失效"))
 	}
 	return data, info, nil
 }
@@ -82,9 +83,9 @@ func CountNodes(data []byte) int {
 func Add(s *app.Settings, name, rawurl string) error {
 	name = Sanitize(name)
 	if s.FindProfile(name) != nil {
-		return fmt.Errorf("订阅 %q 已存在", name)
+		return fmt.Errorf("%s %q %s", i18n.T("订阅"), name, i18n.T("已存在"))
 	}
-	fmt.Printf("下载订阅 %s ...\n", rawurl)
+	fmt.Printf("%s %s ...\n", i18n.T("下载订阅"), rawurl)
 	data, info, err := Download(rawurl, s.DownloadProxy)
 	if err != nil {
 		return err
@@ -116,19 +117,19 @@ func Update(s *app.Settings, name string) error {
 		n := name
 		if n == "" {
 			if s.Current() == nil {
-				return fmt.Errorf("没有可用订阅")
+				return fmt.Errorf("%s", i18n.T("没有可用订阅"))
 			}
 			n = s.Current().Name
 		}
 		p := s.FindProfile(n)
 		if p == nil {
-			return fmt.Errorf("订阅 %q 不存在", n)
+			return fmt.Errorf("%s %q %s", i18n.T("订阅"), n, i18n.T("不存在"))
 		}
 		targets = append(targets, p)
 	}
 	var errs []string
 	for _, p := range targets {
-		fmt.Printf("更新订阅 [%s] ...\n", p.Name)
+		fmt.Printf("%s [%s] ...\n", i18n.T("更新订阅"), p.Name)
 		data, info, err := Download(p.URL, s.DownloadProxy)
 		if err != nil {
 			errs = append(errs, fmt.Sprintf("%s: %v", p.Name, err))
@@ -141,7 +142,7 @@ func Update(s *app.Settings, name string) error {
 		p.UpdatedAt = time.Now()
 		p.Nodes = CountNodes(data)
 		p.UserInfo = info
-		fmt.Printf("  节点数: %d\n", p.Nodes)
+		fmt.Printf("  %s: %d\n", i18n.T("节点数"), p.Nodes)
 	}
 	if err := s.Save(); err != nil {
 		return err
@@ -162,7 +163,7 @@ func Remove(s *app.Settings, name string) error {
 		}
 	}
 	if idx < 0 {
-		return fmt.Errorf("订阅 %q 不存在", name)
+		return fmt.Errorf("%s %q %s", i18n.T("订阅"), name, i18n.T("不存在"))
 	}
 	s.Profiles = append(s.Profiles[:idx], s.Profiles[idx+1:]...)
 	_ = os.Remove(Path(name))

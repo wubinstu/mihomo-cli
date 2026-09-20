@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/wubinstu/mihomo-cli/internal/app"
+	"github.com/wubinstu/mihomo-cli/internal/i18n"
 	"github.com/wubinstu/mihomo-cli/internal/subs"
 	"gopkg.in/yaml.v3"
 )
@@ -26,7 +27,7 @@ func DeepMerge(dst, src map[string]any) {
 func Generate(s *app.Settings) error {
 	p := s.Current()
 	if p == nil {
-		return fmt.Errorf("没有可用订阅, 请先执行 mihomo-cli init 或 mihomo-cli sub add")
+		return fmt.Errorf("%s", i18n.T("没有可用订阅, 请先执行 mihomo-cli init 或 mihomo-cli sub add"))
 	}
 	data, err := os.ReadFile(subs.Path(p.Name))
 	if err != nil {

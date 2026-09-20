@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
+
+	"github.com/wubinstu/mihomo-cli/internal/app"
 )
 
 var lang = "zh"
@@ -15,7 +17,7 @@ func init() {
 	var cfg struct {
 		Lang string `toml:"lang"`
 	}
-	if data, err := os.ReadFile(settingsPath()); err == nil {
+	if data, err := os.ReadFile(app.SettingsFile); err == nil {
 		_ = toml.Unmarshal(data, &cfg)
 	}
 	switch strings.ToLower(cfg.Lang) {
@@ -30,14 +32,6 @@ func init() {
 			lang = "en"
 		}
 	}
-}
-
-func settingsPath() string {
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
-		home = os.Getenv("HOME")
-	}
-	return home + "/.config/mihomo-cli/config.toml"
 }
 
 // Lang 当前语言 ("zh"/"en")
@@ -149,7 +143,7 @@ var en = map[string]string{
 	"分组":                       "GROUP",
 	"类型":                       "TYPE",
 	"当前节点":                     "NOW",
-	"节点":                       "NODE",
+	"节点":                       "nodes",
 	"当前操作分组已切换为":              "current working group set to",
 	"不在该分组中":                  "not in this group",
 	"匹配到多个, 请更精确":             "matches multiple, be more specific",
@@ -254,4 +248,50 @@ var en = map[string]string{
 	"无法连接 mihomo API(服务是否已启动?)": "cannot reach mihomo API (is the service running?)",
 	"写入 systemd 单元失败(需要 root)":  "failed to write systemd unit (root required)",
 	"下载失败":                     "download failed",
+
+	// ---- v0.4 补全 ----
+	"安装内核 + 注册服务":                "install core + register service",
+	"测速超时(毫秒)":                   "delay-test timeout (ms)",
+	"测速 URL":                     "delay-test URL",
+	"持续刷新":                       "keep refreshing",
+	"错误":                         "error",
+	"代理模式 (热切换)":                  "proxy mode (hot switch)",
+	"当前 shell 开启代理":               "enable proxy for current shell",
+	"订阅管理: add/rm/list/update/use/unuse": "subscription: add/rm/list/update/use/unuse",
+	"订阅链接":                       "subscription URL",
+	"订阅名称":                       "subscription name",
+	"订阅自动更新开关":                   "subscription auto-update switch",
+	"订阅自动更新周期":                   "subscription auto-update interval",
+	"跟随日志":                       "follow logs",
+	"更新订阅 (默认当前; all = 全部), 完成后热重载": "update subscriptions (default: current; all), then hot-reload",
+	"更新时间":                       "updated",
+	"关闭当前 shell 的代理环境变量 (服务保持运行)":   "remove proxy env of current shell (service keeps running)",
+	"混合代理端口 (默认 7890)":            "mixed proxy port (default 7890)",
+	"开启代理: 启动服务并输出代理环境变量 (eval $(mihomo-cli proxy on))": "enable proxy: start service and print env (eval $(mihomo-cli proxy on))",
+	"列出全部订阅":                     "list all subscriptions",
+	"名称":                         "NAME",
+	"前台启动内核, 日志输出到终端 ...":         "starting core in foreground, logs to stdout ...",
+	"切换当前生效的订阅":                  "switch the active subscription",
+	"删除订阅":                       "remove a subscription",
+	"使用 amd64-compatible 内核(老旧 CPU)": "use amd64-compatible core (old CPUs)",
+	"输出语言 (默认按系统 locale, 回退中文)":     "output language (default: system locale, fallback zh)",
+	"添加订阅":                       "add a subscription",
+	"添加订阅失败":                     "failed to add subscription",
+	"跳过交互式 init":                 "skip interactive init",
+	"同时删除配置/订阅/内核数据":             "also remove config/subscriptions/core data",
+	"无效周期 (>=1m), 如 15m":          "invalid interval (>=1m), e.g. 15m",
+	"下载内核/订阅使用的代理 (空=直连)":         "proxy for downloading core/subs (empty = direct)",
+	"下载内核使用的代理":                  "proxy for downloading the core",
+	"延迟":                         "DELAY",
+	"允许局域网设备使用代理 (0.0.0.0)":        "allow LAN devices to use the proxy (0.0.0.0)",
+	"运行配置":                       "runtime config",
+	"重命名订阅":                      "rename a subscription",
+	"注意: 自动择优已开启, 下次定时任务可能覆盖此设置":    "note: auto-select is enabled; the next timer run may override this",
+	"自动切换到最低延迟节点":                "auto-switch to the lowest-latency node",
+	"自动择优周期":                     "auto-select interval",
+	"[%s] %s -> %s":               "[%s] %s -> %s",
+	"安装需要 root 权限: 配置目录 /etc/mihomo-cli 与 systemd 单元": "install requires root: /etc/mihomo-cli and systemd units",
+	"下载订阅失败":                    "failed to download subscription",
+	"可能需要 UA 或链接失效":           "check UA or link validity",
+	"不存在":                      "not found",
 }

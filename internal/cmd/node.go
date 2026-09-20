@@ -63,38 +63,46 @@ var nodeGroupFlag string
 var nodeCmd = &cobra.Command{
 	Use:   "node",
 	Short: T("列出当前分组的节点 (索引别名 #1..#n)"),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		s := mustSettings()
-		if s.Current() == nil {
-			return fmt.Errorf("%s", T("没有可用订阅, 请先 mihomo-cli sub use <id|名称>"))
+	RunE:  nodeListRun,
+}
+
+var nodeListCmd = &cobra.Command{
+	Use:   "list",
+	Short: T("列出当前分组的节点 (索引别名 #1..#n)"),
+	RunE:  nodeListRun,
+}
+
+func nodeListRun(cmd *cobra.Command, args []string) error {
+	s := mustSettings()
+	if s.Current() == nil {
+		return fmt.Errorf("%s", T("没有可用订阅, 请先 mihomo-cli sub use <id|名称>"))
+	}
+	c := api.New(s)
+	ps, err := c.Proxies()
+	if err != nil {
+		return err
+	}
+	g, err := workingGroup(c, nodeGroupFlag)
+	if err != nil {
+		return err
+	}
+	rows := [][]string{{"*", "#", T("节点"), T("类型")}}
+	for i, n := range g.All {
+		typ := "node"
+		mark := ""
+		if p, ok := ps.Proxies[n]; ok && groupType(p) {
+			typ = p.Type
+		} else if isDirectish(n) {
+			typ = "policy"
 		}
-		c := api.New(s)
-		ps, err := c.Proxies()
-		if err != nil {
-			return err
+		if n == g.Now {
+			mark = "*"
 		}
-		g, err := workingGroup(c, nodeGroupFlag)
-		if err != nil {
-			return err
-		}
-		rows := [][]string{{"#", T("节点"), T("类型"), ""}}
-		for i, n := range g.All {
-			typ := "node"
-			mark := ""
-			if p, ok := ps.Proxies[n]; ok && groupType(p) {
-				typ = p.Type
-			} else if isDirectish(n) {
-				typ = "policy"
-			}
-			if n == g.Now {
-				mark = "<- now"
-			}
-			rows = append(rows, []string{strconv.Itoa(i + 1), n, typ, mark})
-		}
-		fmt.Printf("[%s] %d %s\n", g.Name, len(g.All), T("节点"))
-		ui.Table(os.Stdout, rows, 2)
-		return nil
-	},
+		rows = append(rows, []string{mark, strconv.Itoa(i + 1), n, typ})
+	}
+	fmt.Printf("[%s] %d %s\n", g.Name, len(g.All), T("节点"))
+	ui.Table(os.Stdout, rows, 2)
+	return nil
 }
 
 var nodeUseCmd = &cobra.Command{
@@ -260,6 +268,6 @@ func init() {
 	for _, sub := range []*cobra.Command{nodeCmd, nodeUseCmd, nodeUnuseCmd, nodeTestCmd, nodeAutoCmd} {
 		sub.Flags().StringVarP(&nodeGroupFlag, "group", "g", "", T("分组")+" (id|名称)")
 	}
-	nodeCmd.AddCommand(nodeUseCmd, nodeUnuseCmd, nodeTestCmd, nodeAutoCmd)
+	nodeCmd.AddCommand(nodeListCmd, nodeUseCmd, nodeUnuseCmd, nodeTestCmd, nodeAutoCmd)
 	rootCmd.AddCommand(nodeCmd)
 }

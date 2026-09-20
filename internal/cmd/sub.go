@@ -25,7 +25,7 @@ var subCmd = &cobra.Command{
 
 func subListRun(cmd *cobra.Command, args []string) error {
 	s := mustSettings()
-	rows := [][]string{{"#", "*", T("名称"), T("节点数"), T("更新时间"), "QUOTA", "URL"}}
+	rows := [][]string{{"*", "#", T("名称"), T("节点数"), T("更新时间"), "QUOTA", "URL"}}
 	for i := range s.Profiles {
 		p := &s.Profiles[i]
 		cur := ""
@@ -33,7 +33,7 @@ func subListRun(cmd *cobra.Command, args []string) error {
 			cur = "*"
 		}
 		rows = append(rows, []string{
-			strconv.Itoa(i + 1), cur, p.Name, strconv.Itoa(p.Nodes),
+			cur, strconv.Itoa(i + 1), p.Name, strconv.Itoa(p.Nodes),
 			humanTime(p.UpdatedAt),
 			shorten(p.UserInfo, 32), shorten(p.URL, 40),
 		})
@@ -170,6 +170,37 @@ var subUnuseCmd = &cobra.Command{
 	},
 }
 
+// subRenameCmd 重命名订阅
+var subRenameCmd = &cobra.Command{
+	Use:   "rename <old> <new>",
+	Short: T("重命名订阅"),
+	Args:  cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		s := mustSettings()
+		oldName, err := resolveSubArg(s, args[0])
+		if err != nil {
+			return err
+		}
+		newName := subs.Sanitize(args[1])
+		if s.FindProfile(newName) != nil && newName != oldName {
+			return fmt.Errorf("%s [%s] %s", T("订阅"), newName, T("已存在"))
+		}
+		p := s.FindProfile(oldName)
+		if err := os.Rename(subs.Path(oldName), subs.Path(newName)); err != nil {
+			return err
+		}
+		p.Name = newName
+		if s.CurrentProfile == oldName {
+			s.CurrentProfile = newName
+		}
+		if err := s.Save(); err != nil {
+			return err
+		}
+		fmt.Printf("%s [%s] -> [%s]\n", T("重命名订阅"), oldName, newName)
+		return nil
+	},
+}
+
 // resolveSubArg 订阅参数解析: 索引(1..n) | 名称
 func resolveSubArg(s *app.Settings, arg string) (string, error) {
 	if n, err := strconv.Atoi(arg); err == nil && n >= 1 && n <= len(s.Profiles) {
@@ -197,6 +228,6 @@ func humanTime(t time.Time) string {
 
 func init() {
 	subAddCmd.Flags().StringVarP(&subAddName, "name", "n", "default", T("订阅名称"))
-	subCmd.AddCommand(subAddCmd, subRmCmd, subListCmd, subUpdateCmd, subUseCmd, subUnuseCmd)
+	subCmd.AddCommand(subAddCmd, subRmCmd, subListCmd, subUpdateCmd, subUseCmd, subUnuseCmd, subRenameCmd)
 	rootCmd.AddCommand(subCmd)
 }

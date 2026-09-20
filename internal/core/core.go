@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/wubinstu/mihomo-cli/internal/app"
+	"github.com/wubinstu/mihomo-cli/internal/i18n"
 )
 
 const repoAPI = "https://api.github.com/repos/MetaCubeX/mihomo/releases/latest"
@@ -66,9 +67,9 @@ func Latest(proxy string) (*Release, error) {
 		return &Release{TagName: tag}, nil
 	}
 	if resp != nil {
-		return nil, fmt.Errorf("GitHub API 返回 %d (可能被限流, 可稍后重试)", resp.StatusCode)
+		return nil, fmt.Errorf("%s %d (%s)", i18n.T("GitHub API 返回"), resp.StatusCode, i18n.T("可能被限流, 可稍后重试"))
 	}
-	return nil, fmt.Errorf("访问 GitHub 失败: %w", err)
+	return nil, fmt.Errorf("%s GitHub: %w", i18n.T("访问失败"), err)
 }
 
 // LatestTag 通过 releases/latest 重定向解析仓库最新 tag (不依赖 API 限额)
@@ -130,7 +131,7 @@ func DownloadInstall(tag, proxy string, compatible bool) error {
 		assetURL = fmt.Sprintf("https://github.com/MetaCubeX/mihomo/releases/download/%s/%s", rel.TagName, assetName)
 	}
 
-	fmt.Printf("下载内核: %s\n", assetURL)
+	fmt.Printf("%s: %s\n", i18n.T("下载内核"), assetURL)
 	if err := downloadGunzip(assetURL, proxy, app.CoreBin+".tmp"); err != nil {
 		return err
 	}
@@ -153,7 +154,7 @@ func downloadGunzip(u, proxy, dst string) error {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
-		return fmt.Errorf("下载返回 %d", resp.StatusCode)
+		return fmt.Errorf("%s %d", i18n.T("下载失败"), resp.StatusCode)
 	}
 	gz, err := gzip.NewReader(resp.Body)
 	if err != nil {
@@ -169,14 +170,14 @@ func downloadGunzip(u, proxy, dst string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("已下载 %.1f MiB\n", float64(n)/1024/1024)
+	fmt.Printf("%s %.1f MiB\n", i18n.T("已下载"), float64(n)/1024/1024)
 	return nil
 }
 
 // Version 获取已安装内核的版本描述
 func Version() (string, error) {
 	if _, err := os.Stat(app.CoreBin); os.IsNotExist(err) {
-		return "", fmt.Errorf("内核未安装, 请先执行 mihomo-cli install")
+		return "", fmt.Errorf("%s", i18n.T("内核未安装, 请先执行 mihomo-cli install"))
 	}
 	out, err := exec.Command(app.CoreBin, "-v").CombinedOutput()
 	if err != nil {
@@ -188,7 +189,7 @@ func Version() (string, error) {
 // Rollback 回滚到备份版本
 func Rollback() error {
 	if _, err := os.Stat(app.CoreBinOld); os.IsNotExist(err) {
-		return fmt.Errorf("没有可回滚的旧版本")
+		return fmt.Errorf("%s", i18n.T("没有可回滚的旧版本"))
 	}
 	_ = os.Remove(app.CoreBin)
 	return os.Rename(app.CoreBinOld, app.CoreBin)
@@ -209,10 +210,10 @@ func Upgrade(proxy string, pre bool) error {
 		return err
 	}
 	if curVer == rel.TagName {
-		fmt.Printf("内核已是最新版本 %s\n", rel.TagName)
+		fmt.Printf("%s %s\n", i18n.T("内核已是最新版本"), rel.TagName)
 		return nil
 	}
-	fmt.Printf("升级内核: %s -> %s\n", curVer, rel.TagName)
+	fmt.Printf("%s: %s -> %s\n", i18n.T("升级内核:"), curVer, rel.TagName)
 	return DownloadInstall(rel.TagName, proxy, false)
 }
 
