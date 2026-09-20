@@ -103,20 +103,26 @@ var statusCmd = &cobra.Command{
 	},
 }
 
-// printTimers 打印自动任务状态: 启用 + 上次 + 下次剩余
+// printTimers 打印自动任务状态: sub 悬空时均显示悬空; group 悬空时择优显示悬空
 func printTimers(s *app.Settings) {
-	if s.Current() != nil {
-		last := humanTime(s.Current().UpdatedAt)
-		next := remaining(s.Current().UpdatedAt, s.SubAutoUpdateInterval)
-		fmt.Printf("%-12s %s | %s %s | %s %s\n", T("订阅自动更新"),
-			onOff2(s.SubAutoUpdateEnabled), T("上次"), last, T("下次"), next)
+	if s.Current() == nil {
+		fmt.Printf("%-12s %s\n", T("订阅自动更新"), T("悬空 (sub unuse)"))
+		fmt.Printf("%-12s %s\n", T("节点自动择优"), T("悬空 (sub unuse)"))
+		return
 	}
-	if !s.AutoSelectLastRun.IsZero() || s.ProxyAutoSelectEnabled {
-		last := humanTime(s.AutoSelectLastRun)
-		next := remaining(s.AutoSelectLastRun, s.ProxyAutoSelectInterval)
-		fmt.Printf("%-12s %s | %s %s | %s %s\n", T("节点自动择优"),
-			onOff2(s.ProxyAutoSelectEnabled), T("上次"), last, T("下次"), next)
+	last := humanTime(s.Current().UpdatedAt)
+	next := remaining(s.Current().UpdatedAt, s.SubAutoUpdateInterval)
+	fmt.Printf("%-12s %s | %s %s | %s %s\n", T("订阅自动更新"),
+		onOff2(s.SubAutoUpdateEnabled), T("上次"), last, T("下次"), next)
+
+	if s.CurrentGroup == "" {
+		fmt.Printf("%-12s %s\n", T("节点自动择优"), T("悬空 (group 未选)"))
+		return
 	}
+	last2 := humanTime(s.AutoSelectLastRun)
+	next2 := remaining(s.AutoSelectLastRun, s.ProxyAutoSelectInterval)
+	fmt.Printf("%-12s %s | %s %s | %s %s\n", T("节点自动择优"),
+		onOff2(s.ProxyAutoSelectEnabled), T("上次"), last2, T("下次"), next2)
 }
 
 func onOff2(b bool) string {
@@ -130,11 +136,16 @@ func remaining(last time.Time, ivl time.Duration) string {
 	if last.IsZero() {
 		return "?"
 	}
-	left := time.Until(last.Add(ivl)).Round(time.Minute)
+	left := time.Until(last.Add(ivl))
 	if left < 0 {
 		left = 0
 	}
-	return left.String()
+	h := int(left.Hours())
+	m := int(left.Minutes()) % 60
+	if h > 0 {
+		return fmt.Sprintf("%dh%dm", h, m)
+	}
+	return fmt.Sprintf("%dm", m)
 }
 
 func init() {

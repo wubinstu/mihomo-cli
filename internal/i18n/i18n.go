@@ -297,6 +297,7 @@ var en = map[string]string{
 	"已悬空: 内核以空配置运行, 全部流量 DIRECT (服务保持运行)":   "unused: core runs with empty config, all traffic DIRECT (service keeps running)",
 	"提示: 可 mihomo-cli sub use <id|名称> 重新启用":            "hint: re-enable with mihomo-cli sub use <id|name>",
 	"服务未运行, 已跳过热重载 (mihomo-cli start)":               "service not running, hot-reload skipped (mihomo-cli start)",
+	"悬空 (group 未选)":                      "dangling (no group selected)",
 	"下载订阅失败":                    "failed to download subscription",
 	"可能需要 UA 或链接失效":           "check UA or link validity",
 	"不存在":                      "not found",
