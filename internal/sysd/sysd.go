@@ -116,7 +116,7 @@ Description=mihomo-cli: auto select lowest-latency proxy
 
 [Service]
 Type=oneshot
-ExecStart=%s proxy auto
+ExecStart=%s node auto
 `, cli)
 	autoTimer := fmt.Sprintf(`[Unit]
 Description=mihomo-cli: auto select timer
@@ -128,7 +128,7 @@ Unit=mihomo-cli-auto.service
 
 [Install]
 WantedBy=timers.target
-`, systemdDur(s.AutoSelectInterval))
+`, systemdDur(s.ProxyAutoSelectInterval))
 
 	if err := writeUnit("mihomo-cli-sub.service", subUnit); err != nil {
 		return err
@@ -154,7 +154,7 @@ WantedBy=timers.target
 	if err != nil {
 		return err
 	}
-	if s.AutoSelectEnabled {
+	if s.ProxyAutoSelectEnabled {
 		_, err = runRoot("systemctl", "enable", "--now", "mihomo-cli-auto.timer")
 	} else {
 		_, _ = runRoot("systemctl", "disable", "--now", "mihomo-cli-auto.timer")

@@ -60,6 +60,9 @@ func Generate(s *app.Settings) error {
 	if s.AllowLan {
 		cfg["bind-address"] = "*"
 	}
+	if s.ProxyMode != "" {
+		cfg["mode"] = s.ProxyMode
+	}
 
 	out, err := yaml.Marshal(cfg)
 	if err != nil {

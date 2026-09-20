@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -28,7 +29,7 @@ var connWatch bool
 
 var connCmd = &cobra.Command{
 	Use:   "conn",
-	Short: "查看活动连接 (--watch 持续刷新)",
+	Short: T("查看活动连接 (--watch 持续刷新)"),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		s := mustSettings()
 		for {
@@ -49,9 +50,12 @@ func printConns(c *api.Client) error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("%s: %d  %s ↑%s ↓%s\n", T("conn.active"), len(r.Connections), T("conn.acc"),
+	fmt.Printf("%s: %d  %s ↑%s ↓%s\n", T("活动连接"), len(r.Connections), T("累计"),
 		humanBytes(r.UploadTotal), humanBytes(r.DownloadTotal))
-	rows := [][]string{strings.Split(T("conn.hdr"), "\t")}
+	if len(r.Connections) == 0 {
+		return nil
+	}
+	rows := [][]string{{T("网络"), T("目标"), T("代理链"), "↑", "↓"}}
 	for _, cn := range r.Connections {
 		host := cn.Metadata.Host
 		if host == "" {
@@ -71,7 +75,7 @@ func printConns(c *api.Client) error {
 
 var trafficCmd = &cobra.Command{
 	Use:   "traffic",
-	Short: "实时上下行流量 (Ctrl-C 退出)",
+	Short: T("实时上下行流量 (Ctrl-C 退出)"),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		s := mustSettings()
 		resp, err := api.New(s).Stream("/traffic")
@@ -79,7 +83,7 @@ var trafficCmd = &cobra.Command{
 			return err
 		}
 		defer resp.Body.Close()
-		fmt.Println(T("tr.title"))
+		fmt.Println(T("实时流量 (每秒):"))
 		sc := bufio.NewScanner(resp.Body)
 		for sc.Scan() {
 			var t struct {
@@ -100,16 +104,14 @@ var logFollow bool
 
 var logCmd = &cobra.Command{
 	Use:   "log",
-	Short: "查看内核日志 (-f 跟随)",
+	Short: T("查看内核日志 (-f 跟随)"),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if _, err := os.Stat(app.LogFile); err != nil {
-			return fmt.Errorf("暂无日志 (%s)", app.LogFile)
+			return fmt.Errorf("%s (%s)", T("暂无日志"), app.LogFile)
 		}
 		c := exec.Command("tail", "-n", "100")
 		if logFollow {
 			c = exec.Command("tail", "-n", "100", "-f", app.LogFile)
-		} else {
-			c = exec.Command("tail", "-n", "100", app.LogFile)
 		}
 		c.Stdout = os.Stdout
 		c.Stderr = os.Stderr
@@ -117,51 +119,11 @@ var logCmd = &cobra.Command{
 	},
 }
 
-// ---- env ----
-
-var envUnset bool
-
-var envCmd = &cobra.Command{
-	Use:   "env",
-	Short: "输出代理环境变量 (eval $(mihomo-cli env) 生效)",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		s := mustSettings()
-		if envUnset {
-			fmt.Println(`unset http_proxy https_proxy all_proxy HTTP_PROXY HTTPS_PROXY ALL_PROXY`)
-			return nil
-		}
-		addr := fmt.Sprintf("127.0.0.1:%d", s.MixedPort)
-		if s.AllowLan {
-			// 输出本机局域网地址方便其他设备引用
-			addr = fmt.Sprintf("%s:%d", lanIP(), s.MixedPort)
-		}
-		fmt.Printf(`export http_proxy=http://%s
-export https_proxy=http://%s
-export all_proxy=socks5://%s
-export HTTP_PROXY=http://%s
-export HTTPS_PROXY=http://%s
-export ALL_PROXY=socks5://%s
-export no_proxy=localhost,127.0.0.1,::1
-export NO_PROXY=localhost,127.0.0.1,::1
-`, addr, addr, addr, addr, addr, addr)
-		return nil
-	},
-}
-
-func lanIP() string {
-	conn, err := net.Dial("udp", "8.8.8.8:53")
-	if err != nil {
-		return "0.0.0.0"
-	}
-	defer conn.Close()
-	return conn.LocalAddr().(*net.UDPAddr).IP.String()
-}
-
 // ---- doctor ----
 
 var doctorCmd = &cobra.Command{
 	Use:   "doctor",
-	Short: "体检: 内核/服务/端口/API/订阅/定时器",
+	Short: T("体检: 内核/服务/端口/API/订阅/定时器"),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		s := mustSettings()
 		ok := func(good bool) string {
@@ -170,69 +132,60 @@ var doctorCmd = &cobra.Command{
 			}
 			return "✘"
 		}
-		// 目录
 		err := app.EnsureDirs()
-		fmt.Printf("%s %-14s %s\n", ok(err == nil), T("dr.dir"), app.BaseDir)
-		// 内核
+		fmt.Printf("%s %-14s %s\n", ok(err == nil), T("数据目录"), app.BaseDir)
 		v, err := core.Version()
-		fmt.Printf("%s %-14s %s\n", ok(err == nil), T("dr.core"), orDash(v, err))
-		// 订阅
+		fmt.Printf("%s %-14s %s\n", ok(err == nil), T("内核"), orDash(v, err))
 		var pinfo string
 		if p := s.Current(); p != nil {
-			pinfo = fmt.Sprintf("%s (%d nodes, %s)", p.Name, p.Nodes, humanTime(p.UpdatedAt))
+			pinfo = fmt.Sprintf("%s (%d %s, %s)", p.Name, p.Nodes, T("节点"), humanTime(p.UpdatedAt))
 		}
-		fmt.Printf("%s %-14s %s\n", ok(s.Current() != nil), T("dr.sub"), orDash(pinfo, nil))
-		// 运行配置
+		fmt.Printf("%s %-14s %s\n", ok(s.Current() != nil), T("订阅"), orDash(pinfo, nil))
 		_, err = os.Stat(app.RuntimeConfig)
-		fmt.Printf("%s %-14s %s\n", ok(err == nil), T("dr.rt"), app.RuntimeConfig)
-		// 服务
+		fmt.Printf("%s %-14s %s\n", ok(err == nil), T("运行配置"), app.RuntimeConfig)
 		active := sysd.IsActive()
-		svc := T("svc.running")
-		if !active {
-			svc = T("svc.start.hint")
+		svc := T("未运行 (mihomo-cli start)")
+		if active {
+			svc = T("运行中")
 		}
-		fmt.Printf("%s %-14s %s\n", ok(active), T("dr.svc"), svc)
-		// API
+		fmt.Printf("%s %-14s %s\n", ok(active), T("服务"), svc)
 		var apiInfo string
 		ver, err := api.New(s).Version()
 		if err == nil {
-			apiInfo = T("dr.api.ok") + ver
+			apiInfo = T("API 正常, 内核") + " " + ver
 		}
-		fmt.Printf("%s %-14s %s\n", ok(err == nil), T("dr.api"), orDash(apiInfo, err))
-		// 代理端口
+		fmt.Printf("%s %-14s %s\n", ok(err == nil), T("控制API"), orDash(apiInfo, err))
 		live := portOpen(fmt.Sprintf("127.0.0.1:%d", s.MixedPort))
-		fmt.Printf("%s %-14s 127.0.0.1:%d %s\n", ok(live), T("dr.port"), s.MixedPort, listenWord(live))
+		fmt.Printf("%s %-14s 127.0.0.1:%d %s\n", ok(live), T("代理端口"), s.MixedPort, listenWord(live))
 		if s.AllowLan {
 			live2 := portOpen(fmt.Sprintf("0.0.0.0:%d", s.MixedPort))
 			fmt.Printf("%s %-14s 0.0.0.0:%d %s (LAN: http://%s:%d)\n",
-				ok(live2), T("dr.lan"), s.MixedPort, listenWord(live2), lanIP(), s.MixedPort)
+				ok(live2), T("局域网"), s.MixedPort, listenWord(live2), lanIP(), s.MixedPort)
 		}
-		// 定时器
 		subOn := sysd.TimerEnabled("mihomo-cli-sub.timer")
 		fmt.Printf("%s %-14s %s (%s %s)\n", ok(subOn == s.SubAutoUpdateEnabled),
-			T("dr.subau"), onOff(subOn), T("dr.period"), s.SubAutoUpdateInterval)
+			T("订阅自动更新"), onOff(subOn), T("周期"), s.SubAutoUpdateInterval)
 		autoOn := sysd.TimerEnabled("mihomo-cli-auto.timer")
-		fmt.Printf("%s %-14s %s (%s %s, %s %s)\n", ok(autoOn == s.AutoSelectEnabled),
-			T("dr.auto"), onOff(autoOn), T("dr.period"), s.AutoSelectInterval,
-			T("dr.groups"), orDash(strings.Join(s.AutoGroups, ","), nil))
-		// 直连测试
-		fmt.Println(T("dr.hint"))
+		fmt.Printf("%s %-14s %s (%s %s, %s %s)\n", ok(autoOn == s.ProxyAutoSelectEnabled),
+			T("自动择优节点"), onOff(autoOn), T("周期"), s.ProxyAutoSelectInterval,
+			T("分组"), orDash(s.ProxyAutoSelectGroup, nil))
+		fmt.Println(T("提示: 使用 curl -I https://www.google.com 验证代理是否生效 (先 eval $(mihomo-cli proxy on))"))
 		return nil
 	},
 }
 
 func onOff(b bool) string {
 	if b {
-		return T("dr.timer.on")
+		return T("已启用")
 	}
-	return T("dr.timer.off")
+	return T("已停用")
 }
 
 func listenWord(live bool) string {
 	if live {
-		return "LISTEN"
+		return T("监听中")
 	}
-	return "-"
+	return T("未监听")
 }
 
 func orDash(s string, err error) string {
@@ -258,21 +211,21 @@ func portOpen(addr string) bool {
 
 var setCmd = &cobra.Command{
 	Use:   "set <key> <value>",
-	Short: "修改设置并生效",
-	Long: `可配置项:
-  lang <zh|en>                     输出语言 (默认按系统 locale, 回退中文)
-  allow-lan <true|false>           允许局域网设备使用代理 (0.0.0.0)
-  mixed-port <port>                混合代理端口 (默认 7890)
-  sub-auto-update-enabled <bool>   订阅自动更新开关
-  sub-auto-update-interval <dur>   订阅自动更新周期, 如 12h / 30m
-  auto-select-enabled <bool>       自动切换到最低延迟节点
-  auto-select-interval <dur>       自动择优周期, 如 15m
-  auto-groups <g1,g2>              自动择优作用的分组 (空=全部含真实节点的分组)
-  test-url <url>                   测速 URL
-  test-timeout <ms>                测速超时(毫秒)
-  download-proxy <url>             下载内核/订阅使用的代理 (空=直连)
+	Short: T("修改设置并生效"),
+	Long: `lang <zh|en>                     ` + T("输出语言 (默认按系统 locale, 回退中文)") + `
+allow-lan <true|false>           ` + T("允许局域网设备使用代理 (0.0.0.0)") + `
+mixed-port <port>                ` + T("混合代理端口 (默认 7890)") + `
+proxy-mode <rule|global|direct>  ` + T("代理模式 (热切换)") + `
+sub-auto-update-enabled <bool>   ` + T("订阅自动更新开关") + `
+sub-auto-update-interval <dur>   ` + T("订阅自动更新周期") + `, 如 12h / 30m
+proxy-auto-select-enabled <bool>   ` + T("自动切换到最低延迟节点") + `
+proxy-auto-select-interval <dur>   ` + T("自动择优周期") + `, 如 15m
+proxy-auto-select-group <id|名称>   ` + T("自动择优作用的分组") + ` (` + T("空=全部含真实节点的分组") + `)
+test-url <url>                   ` + T("测速 URL") + `
+test-timeout <ms>                ` + T("测速超时(毫秒)") + `
+download-proxy <url>             ` + T("下载内核/订阅使用的代理 (空=直连)") + `
 
-旧键名 sub-auto-update / sub-interval / auto-select / auto-interval 仍被接受。`,
+` + T("旧键名 auto-select-* / sub-auto-update / sub-interval 仍被接受。"),
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		s := mustSettings()
@@ -284,9 +237,11 @@ var setCmd = &cobra.Command{
 		case "sub-interval":
 			k = "sub-auto-update-interval"
 		case "auto-select":
-			k = "auto-select-enabled"
+			k = "proxy-auto-select-enabled"
 		case "auto-interval":
-			k = "auto-select-interval"
+			k = "proxy-auto-select-interval"
+		case "auto-groups":
+			k = "proxy-auto-select-group"
 		}
 		b := func() bool {
 			return v == "true" || v == "on" || v == "yes" || v == "1"
@@ -294,7 +249,7 @@ var setCmd = &cobra.Command{
 		switch k {
 		case "lang":
 			if v != "zh" && v != "en" {
-				return fmt.Errorf("lang 仅支持 zh / en")
+				return fmt.Errorf("%s", T("lang 仅支持 zh / en"))
 			}
 			s.Lang = v
 			i18n.Set(v)
@@ -303,48 +258,57 @@ var setCmd = &cobra.Command{
 		case "mixed-port":
 			n, err := strconv.Atoi(v)
 			if err != nil || n < 1 || n > 65535 {
-				return fmt.Errorf("无效端口")
+				return fmt.Errorf("%s", T("无效端口"))
 			}
 			s.MixedPort = n
+		case "proxy-mode":
+			if v != "rule" && v != "global" && v != "direct" {
+				return fmt.Errorf("%s", T("proxy-mode 仅支持 rule / global / direct"))
+			}
+			s.ProxyMode = v
 		case "sub-auto-update-enabled":
 			s.SubAutoUpdateEnabled = b()
 		case "sub-auto-update-interval":
 			d, err := time.ParseDuration(v)
 			if err != nil || d < time.Minute {
-				return fmt.Errorf("无效周期 (>=1m), 如 12h")
+				return fmt.Errorf("%s", T("无效周期 (>=1m), 如 12h"))
 			}
 			s.SubAutoUpdateInterval = d
-		case "auto-select-enabled":
-			s.AutoSelectEnabled = b()
-		case "auto-select-interval":
+		case "proxy-auto-select-enabled":
+			s.ProxyAutoSelectEnabled = b()
+		case "proxy-auto-select-interval":
 			d, err := time.ParseDuration(v)
 			if err != nil || d < time.Minute {
-				return fmt.Errorf("无效周期 (>=1m), 如 15m")
+				return fmt.Errorf("%s", T("无效周期 (>=1m), 如 15m"))
 			}
-			s.AutoSelectInterval = d
-		case "auto-groups":
-			if v == "" {
-				s.AutoGroups = nil
-			} else {
-				s.AutoGroups = strings.Split(v, ",")
-			}
+			s.ProxyAutoSelectInterval = d
+		case "proxy-auto-select-group":
+			s.ProxyAutoSelectGroup = v
 		case "test-url":
 			s.TestURL = v
 		case "test-timeout":
 			n, err := strconv.Atoi(v)
 			if err != nil || n < 100 {
-				return fmt.Errorf("无效超时")
+				return fmt.Errorf("%s", T("无效超时"))
 			}
 			s.TestTimeout = n
 		case "download-proxy":
 			s.DownloadProxy = v
 		default:
-			return fmt.Errorf("未知配置项 %q (见 mihomo-cli set --help)", k)
+			return fmt.Errorf("%s %q (mihomo-cli set --help)", T("未知配置项"), k)
 		}
 		if err := s.Save(); err != nil {
 			return err
 		}
-		fmt.Printf("%s = %s %s\n", k, v, T("set.saved"))
+		fmt.Printf("%s = %s %s\n", k, v, T("已保存"))
+		// proxy-mode 轻量热切换, 不做整配置 reload
+		if k == "proxy-mode" && sysd.IsActive() {
+			if err := api.New(s).SetMode(v); err != nil {
+				return err
+			}
+			fmt.Println(T("已热重载配置"))
+			return nil
+		}
 		// 重建运行配置 + 定时器 + 热重载
 		if s.Current() != nil {
 			if err := render.Generate(s); err == nil {
@@ -352,7 +316,7 @@ var setCmd = &cobra.Command{
 			}
 		}
 		if err := sysd.InstallTimers(s); err != nil {
-			fmt.Fprintf(os.Stderr, "警告: 更新定时器失败: %v\n", err)
+			fmt.Fprintf(os.Stderr, "%s: %v\n", T("警告: 更新定时器失败"), err)
 		}
 		return nil
 	},
@@ -360,26 +324,32 @@ var setCmd = &cobra.Command{
 
 var getCmd = &cobra.Command{
 	Use:   "get [key]",
-	Short: "查看设置 (无参数 = 全部)",
+	Short: T("查看设置 (无参数 = 全部)"),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		s := mustSettings()
 		lang := s.Lang
 		if lang == "" {
 			lang = i18n.Lang() + " (auto)"
 		}
+		mode := s.ProxyMode
+		if mode == "" {
+			mode = "rule (sub default)"
+		}
 		all := [][2]string{
 			{"lang", lang},
 			{"allow-lan", fmt.Sprintf("%v", s.AllowLan)},
 			{"mixed-port", fmt.Sprintf("%d", s.MixedPort)},
+			{"proxy-mode", mode},
 			{"sub-auto-update-enabled", fmt.Sprintf("%v", s.SubAutoUpdateEnabled)},
 			{"sub-auto-update-interval", s.SubAutoUpdateInterval.String()},
-			{"auto-select-enabled", fmt.Sprintf("%v", s.AutoSelectEnabled)},
-			{"auto-select-interval", s.AutoSelectInterval.String()},
-			{"auto-groups", strings.Join(s.AutoGroups, ",")},
+			{"proxy-auto-select-enabled", fmt.Sprintf("%v", s.ProxyAutoSelectEnabled)},
+			{"proxy-auto-select-interval", s.ProxyAutoSelectInterval.String()},
+			{"proxy-auto-select-group", s.ProxyAutoSelectGroup},
 			{"test-url", s.TestURL},
 			{"test-timeout", fmt.Sprintf("%dms", s.TestTimeout)},
 			{"download-proxy", s.DownloadProxy},
 			{"current-profile", s.CurrentProfile},
+			{"current-group", s.CurrentGroup},
 		}
 		if len(args) == 0 {
 			rows := [][]string{{"KEY", "VALUE"}}
@@ -395,7 +365,7 @@ var getCmd = &cobra.Command{
 				return nil
 			}
 		}
-		return fmt.Errorf("未知配置项 %q", args[0])
+		return fmt.Errorf("%s %q", T("未知配置项"), args[0])
 	},
 }
 
@@ -403,12 +373,12 @@ var getCmd = &cobra.Command{
 
 var coreCmd = &cobra.Command{
 	Use:   "core",
-	Short: "内核管理: version/upgrade/rollback",
+	Short: T("内核管理: version/upgrade/rollback"),
 }
 
 var coreVersionCmd = &cobra.Command{
 	Use: "version",
-	Short: "已安装内核版本",
+	Short: T("已安装内核版本"),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		v, err := core.Version()
 		if err != nil {
@@ -421,7 +391,7 @@ var coreVersionCmd = &cobra.Command{
 
 var coreUpgradeCmd = &cobra.Command{
 	Use:   "upgrade",
-	Short: "升级内核 (从 GitHub Releases)",
+	Short: T("升级内核 (从 GitHub Releases)"),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		s := mustSettings()
 		if err := core.Upgrade(s.DownloadProxy, false); err != nil {
@@ -436,7 +406,7 @@ var coreUpgradeCmd = &cobra.Command{
 
 var coreRollbackCmd = &cobra.Command{
 	Use:   "rollback",
-	Short: "回滚到上一版本",
+	Short: T("回滚到上一版本"),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := core.Rollback(); err != nil {
 			return err
@@ -450,13 +420,13 @@ var coreRollbackCmd = &cobra.Command{
 
 // ---- version ----
 
-var Version = "0.1.0"
+var Version = "0.2.0"
 
 var versionCmd = &cobra.Command{
 	Use: "version",
-	Short: "mihomo-cli 版本",
+	Short: T("mihomo-cli 版本"),
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Printf("mihomo-cli %s (%s/%s)\n", Version, runtimeGOOS(), runtimeGOARCH())
+		fmt.Printf("mihomo-cli %s (%s/%s)\n", Version, runtime.GOOS, runtime.GOARCH)
 	},
 }
 
@@ -472,9 +442,8 @@ func humanBytes(n int64) string {
 }
 
 func init() {
-	connCmd.Flags().BoolVar(&connWatch, "watch", false, "持续刷新")
-	logCmd.Flags().BoolVarP(&logFollow, "follow", "f", false, "跟随日志")
-	envCmd.Flags().BoolVar(&envUnset, "unset", false, "输出 unset 命令")
+	connCmd.Flags().BoolVar(&connWatch, "watch", false, T("持续刷新"))
+	logCmd.Flags().BoolVarP(&logFollow, "follow", "f", false, T("跟随日志"))
 	coreCmd.AddCommand(coreVersionCmd, coreUpgradeCmd, coreRollbackCmd)
-	rootCmd.AddCommand(connCmd, trafficCmd, logCmd, envCmd, doctorCmd, setCmd, getCmd, coreCmd, versionCmd)
+	rootCmd.AddCommand(connCmd, trafficCmd, logCmd, doctorCmd, setCmd, getCmd, coreCmd, versionCmd)
 }

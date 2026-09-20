@@ -22,40 +22,43 @@ type Profile struct {
 type Settings struct {
 	Lang           string `toml:"lang"` // "zh" | "en"; 空则按 $LANG 自动判断
 	CurrentProfile string `toml:"current_profile"`
-	DownloadProxy  string `toml:"download_proxy"` // 下载内核/订阅时使用的代理, 空则直连
+	CurrentGroup   string `toml:"current_group"` // group/node 命令的当前操作分组
+	DownloadProxy  string `toml:"download_proxy"`
 
-	// 代理监听
-	AllowLan  bool `toml:"allow_lan"`  // 监听 0.0.0.0, 局域网可用
-	MixedPort int  `toml:"mixed_port"` // http+socks5 混合端口
+	// 代理监听与模式
+	AllowLan  bool   `toml:"allow_lan"`  // 监听 0.0.0.0, 局域网可用
+	MixedPort int    `toml:"mixed_port"` // http+socks5 混合端口
+	ProxyMode string `toml:"proxy_mode"` // rule / global / direct; 空则跟随订阅
 
 	// 外部控制 API
 	APIBase   string `toml:"api_base"`
 	APISecret string `toml:"api_secret"`
 
 	// 订阅自动更新
-	SubAutoUpdateEnabled bool          `toml:"sub_auto_update_enabled"`
-	SubAutoUpdateInterval time.Duration `toml:"sub_auto_update_interval"` // 默认 24h
+	SubAutoUpdateEnabled  bool          `toml:"sub_auto_update_enabled"`
+	SubAutoUpdateInterval time.Duration `toml:"sub_auto_update_interval"`
 
 	// 自动测速并切换到最低延迟节点
-	AutoSelectEnabled bool          `toml:"auto_select_enabled"`
-	AutoSelectInterval time.Duration `toml:"auto_select_interval"` // 默认 30m
-	AutoGroups        []string      `toml:"auto_groups"`           // 生效分组, 空 = 所有含真实节点的 Selector 分组
-	TestURL           string        `toml:"test_url"`
-	TestTimeout       int           `toml:"test_timeout_ms"` // 默认 5000
+	ProxyAutoSelectEnabled  bool          `toml:"proxy_auto_select_enabled"`
+	ProxyAutoSelectInterval time.Duration `toml:"proxy_auto_select_interval"`
+	ProxyAutoSelectGroup    string        `toml:"proxy_auto_select_group"` // 空 = 所有含真实节点的分组
+
+	TestURL     string `toml:"test_url"`
+	TestTimeout int    `toml:"test_timeout_ms"`
 
 	Profiles []Profile `toml:"profiles"`
 }
 
 func DefaultSettings() *Settings {
 	return &Settings{
-		MixedPort:            7890,
-		APIBase:              "http://127.0.0.1:9090",
-		SubAutoUpdateEnabled: true,
-		SubAutoUpdateInterval: 24 * time.Hour,
-		AutoSelectEnabled:    false,
-		AutoSelectInterval:   30 * time.Minute,
-		TestURL:              "https://www.gstatic.com/generate_204",
-		TestTimeout:          5000,
+		MixedPort:               7890,
+		APIBase:                 "http://127.0.0.1:9090",
+		SubAutoUpdateEnabled:    true,
+		SubAutoUpdateInterval:   24 * time.Hour,
+		ProxyAutoSelectEnabled:  false,
+		ProxyAutoSelectInterval: 30 * time.Minute,
+		TestURL:                 "https://www.gstatic.com/generate_204",
+		TestTimeout:             5000,
 	}
 }
 
@@ -85,14 +88,19 @@ func LoadSettings() (*Settings, error) {
 	if s.SubAutoUpdateInterval <= 0 {
 		s.SubAutoUpdateInterval = 24 * time.Hour
 	}
-	if s.AutoSelectInterval <= 0 {
-		s.AutoSelectInterval = 30 * time.Minute
+	if s.ProxyAutoSelectInterval <= 0 {
+		s.ProxyAutoSelectInterval = 30 * time.Minute
 	}
 	if s.TestURL == "" {
 		s.TestURL = "https://www.gstatic.com/generate_204"
 	}
 	if s.TestTimeout <= 0 {
 		s.TestTimeout = 5000
+	}
+	switch s.ProxyMode {
+	case "rule", "global", "direct", "":
+	default:
+		s.ProxyMode = ""
 	}
 	return s, nil
 }
@@ -119,7 +127,7 @@ func (s *Settings) FindProfile(name string) *Profile {
 	return nil
 }
 
-// CurrentProfile 返回当前生效的订阅, 不存在则返回 nil
+// Current 返回当前生效的订阅, 不存在则返回 nil
 func (s *Settings) Current() *Profile {
 	if s.CurrentProfile == "" && len(s.Profiles) > 0 {
 		return &s.Profiles[0]

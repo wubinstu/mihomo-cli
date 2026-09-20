@@ -14,17 +14,13 @@ func T(key string) string { return i18n.T(key) }
 
 var rootCmd = &cobra.Command{
 	Use:   "mihomo-cli",
-	Short: "mihomo 内核的纯 CLI 管理外壳 (Linux 服务器代理工具)",
-	Long: `mihomo-cli - 面向 Linux 服务器的 Clash/mihomo 代理管理工具
+	Short: T("mihomo 内核的纯 CLI 管理外壳 (Linux 服务器代理工具)"),
+	Long: `mihomo-cli - ` + T("面向 Linux 服务器的 Clash/mihomo 代理管理工具") + `
 
-内核(mihomo)存放于 ~/.config/mihomo-cli/bin/, 不与 PATH 冲突;
-服务以 systemd 托管, 控制走 external-controller API。
-
-快速上手:
-  mihomo-cli install          安装内核 + 注册服务
-  mihomo-cli init             添加订阅
-  mihomo-cli start            启动代理
-  eval $(mihomo-cli env)      当前 shell 开启代理`,
+mihomo-cli install          ` + T("安装内核 + 注册服务") + `
+mihomo-cli init             ` + T("添加订阅") + `
+mihomo-cli start            ` + T("启动代理服务") + `
+eval $(mihomo-cli proxy on) ` + T("当前 shell 开启代理"),
 	SilenceUsage: true,
 }
 
@@ -36,6 +32,6 @@ func Execute() {
 
 // fail 打印错误并退出
 func fail(err error) {
-	fmt.Fprintln(os.Stderr, "错误:", err)
+	fmt.Fprintln(os.Stderr, T("错误")+":", err)
 	os.Exit(1)
 }

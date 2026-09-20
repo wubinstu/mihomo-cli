@@ -157,6 +157,31 @@ func (c *Client) Reload(path string) error {
 	return nil
 }
 
+// SetMode 热切换代理模式 (rule/global/direct)
+func (c *Client) SetMode(mode string) error {
+	resp, err := c.do("PATCH", "/configs", map[string]string{"mode": mode})
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 204 && resp.StatusCode != 200 {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return fmt.Errorf("切换模式失败 %d: %s", resp.StatusCode, string(b))
+	}
+	return nil
+}
+
+// ConfigMode 读取内核当前代理模式
+func (c *Client) ConfigMode() (string, error) {
+	var cfg struct {
+		Mode string `json:"mode"`
+	}
+	if err := c.GetJSON("/configs", &cfg); err != nil {
+		return "", err
+	}
+	return cfg.Mode, nil
+}
+
 // Stream 返回流式响应(用于 /traffic)
 func (c *Client) Stream(path string) (*http.Response, error) {
 	return c.do("GET", path, nil)

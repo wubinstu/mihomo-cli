@@ -37,17 +37,18 @@ mihomo-cli install [--proxy http://host:port] [--sub <订阅URL>] [--allow-lan]
 ```
 mihomo-cli start|stop|restart|status    服务生命周期
 mihomo-cli run                          前台运行(调试)
-mihomo-cli sub add|rm|list|update|use   订阅管理
-mihomo-cli proxy                        查看分组 (CJK 宽度对齐)
-mihomo-cli proxy set <组> <节点>         切换节点(模糊匹配)
-mihomo-cli proxy test [组]              节点测速
-mihomo-cli proxy auto                   立即择优一次
+mihomo-cli sub add|rm|list|update|use   订阅管理 (支持 #id 索引)
+mihomo-cli group                        分组列表 (#1..#n 索引别名, emoji 名免输入)
+mihomo-cli group use <id|名称>           选择当前操作分组
+mihomo-cli node                         当前分组的节点列表 (#1..#n)
+mihomo-cli node set <id|名称>            切换节点 (自动择优开启时会提示)
+mihomo-cli node test                    节点测速 (彩色: 绿<200 蓝<500 黄<3000 红/灰超时)
+mihomo-cli node auto                    立即择优一次
 mihomo-cli proxy on/off                 开/关当前 shell 代理(配合 alias)
 mihomo-cli conn [--watch]               活动连接
 mihomo-cli traffic                      实时流量
 mihomo-cli log [-f]                     内核日志
 mihomo-cli core upgrade|rollback        内核升级/回滚
-mihomo-cli env [--unset]                代理环境变量
 mihomo-cli doctor                       体检
 mihomo-cli get/set [key]                查看/修改设置
 mihomo-cli uninstall [--purge]          卸载
@@ -61,6 +62,18 @@ alias proxy_off='eval $(mihomo-cli proxy off)'
 ```
 
 bash/zsh/fish 补全脚本随 `install` 自动安装、随 `uninstall` 清理。
+所有命令输出/帮助双语: `set lang zh|en`（默认按系统 locale, 回退中文）。
+
+## 三层结构与命令对应
+
+```
+订阅(sub) ──sub use──> 生效订阅
+   └─ 分组(group) ──group use──> 当前操作分组
+        └─ 节点(node) ──node set──> 分组选中的节点
+```
+
+注意: 规则模式下不同流量按规则走不同分组（国内直连、国外走代理组）,
+多个分组同时生效; 自动择优 (`node auto`) 定时对指定分组选择最低延迟节点。
 
 ## 配置 (`mihomo-cli get [key]` / `mihomo-cli set key value`)
 
@@ -69,13 +82,17 @@ bash/zsh/fish 补全脚本随 `install` 自动安装、随 `uninstall` 清理。
 | `lang` | 输出语言 `zh`/`en` | 按系统 locale, 回退中文 |
 | `allow-lan` | 允许局域网设备使用代理 (0.0.0.0) | `false` |
 | `mixed-port` | 混合代理端口 (http+socks5) | `7890` |
+| `proxy-mode` | 代理模式 `rule`/`global`/`direct` (热切换) | 跟随订阅 |
 | `sub-auto-update-enabled` | 订阅定时自动更新 | `true` |
 | `sub-auto-update-interval` | 订阅更新周期 (如 `12h`) | `24h` |
-| `auto-select-enabled` | 自动切换到最低延迟节点 | `false` |
-| `auto-select-interval` | 自动择优周期 (如 `15m`) | `30m` |
-| `auto-groups` | 择优作用的分组, 逗号分隔 (空=全部含真实节点的分组) | 空 |
+| `proxy-auto-select-enabled` | 自动切换到最低延迟节点 | `false` |
+| `proxy-auto-select-interval` | 自动择优周期 (如 `15m`) | `30m` |
+| `proxy-auto-select-group` | 择优作用的分组 id/名称 (空=全部含真实节点的分组) | 空 |
 | `test-url` / `test-timeout` | 测速 URL / 超时 ms | gstatic 204 / 5000 |
 | `download-proxy` | 下载内核/订阅使用的代理 | 直连 |
+
+手动 `node set` 时若 `proxy-auto-select-enabled` 为 true 会提示可能被下次自动择优覆盖。
+自动任务通过 systemd timer (`mihomo-cli-sub.timer` / `mihomo-cli-auto.timer`) 实现, `set` 修改后立即生效。
 
 自动任务通过 systemd timer (`mihomo-cli-sub.timer` / `mihomo-cli-auto.timer`) 实现, `set` 修改后立即生效。
 

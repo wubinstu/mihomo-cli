@@ -7,10 +7,21 @@ import (
 	"strings"
 )
 
-// Width 计算字符串的终端显示宽度 (CJK/全角=2, 变体选择符=0)
+// Width 计算字符串的终端显示宽度 (CJK/全角=2, 变体选择符=0, ANSI 转义序列不计)
 func Width(s string) int {
 	w := 0
+	skip := false
 	for _, r := range s {
+		if r == 0x1b { // ESC: 进入 ANSI 序列, 直到字母结束
+			skip = true
+			continue
+		}
+		if skip {
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') {
+				skip = false
+			}
+			continue
+		}
 		switch {
 		case r == 0xFE0F || r == 0x200D: // emoji 变体选择符/零宽连接符
 			continue
@@ -34,6 +45,32 @@ func Width(s string) int {
 		}
 	}
 	return w
+}
+
+// DelayColor 按延迟返回 ANSI 颜色码: <200 绿, 200-500 蓝, 500-3000 黄, >3000 红, <=0 灰(超时)
+func DelayColor(ms int) string {
+	switch {
+	case ms <= 0:
+		return "\x1b[90m" // 灰
+	case ms < 200:
+		return "\x1b[32m" // 绿
+	case ms < 500:
+		return "\x1b[34m" // 蓝
+	case ms < 3000:
+		return "\x1b[33m" // 黄
+	default:
+		return "\x1b[31m" // 红
+	}
+}
+
+const ColorReset = "\x1b[0m"
+
+// Colorpad 带颜色的延迟单元格 (考虑 ANSI 码不计宽度)
+func ColorDelay(ms int) string {
+	if ms <= 0 {
+		return DelayColor(ms) + "timeout" + ColorReset
+	}
+	return DelayColor(ms) + fmt.Sprintf("%d ms", ms) + ColorReset
 }
 
 func pad(s string, w int) string {
