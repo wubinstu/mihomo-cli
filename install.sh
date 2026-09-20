@@ -5,13 +5,12 @@ set -euo pipefail
 
 REPO="wubinstu/mihomo-cli"
 PROXY="${PROXY:-}"
-for a in "$@"; do
-  case "$a" in
-    --proxy) :;;;
-    --proxy=*) PROXY="${a#--proxy=}";;
-    *) if [ "${PREV:-}" = "--proxy" ]; then PROXY="$a"; fi;;
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --proxy) PROXY="$2"; shift 2;;
+    --proxy=*) PROXY="${1#--proxy=}"; shift;;
+    *) echo "未知参数: $1"; shift;;
   esac
-  PREV="$a"
 done
 
 ARCH=$(uname -m)
