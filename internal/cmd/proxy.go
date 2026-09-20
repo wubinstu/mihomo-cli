@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"sort"
 	"strings"
@@ -194,7 +195,7 @@ var proxyAutoCmd = &cobra.Command{
 				failed++
 				continue
 			}
-			best, bestD := "", 1<<62
+			best, bestD := "", math.MaxInt
 			for n, d := range delay {
 				if d <= 0 || d >= bestD {
 					continue
