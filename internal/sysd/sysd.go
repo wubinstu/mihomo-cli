@@ -109,7 +109,7 @@ Unit=mihomo-cli-sub.service
 
 [Install]
 WantedBy=timers.target
-`, systemdDur(s.SubInterval))
+`, systemdDur(s.SubAutoUpdateInterval))
 
 	autoUnit := fmt.Sprintf(`[Unit]
 Description=mihomo-cli: auto select lowest-latency proxy
@@ -128,7 +128,7 @@ Unit=mihomo-cli-auto.service
 
 [Install]
 WantedBy=timers.target
-`, systemdDur(s.AutoInterval))
+`, systemdDur(s.AutoSelectInterval))
 
 	if err := writeUnit("mihomo-cli-sub.service", subUnit); err != nil {
 		return err
@@ -146,7 +146,7 @@ WantedBy=timers.target
 		return err
 	}
 	// 按设置启停
-	if s.SubAutoUpdate {
+	if s.SubAutoUpdateEnabled {
 		_, err = runRoot("systemctl", "enable", "--now", "mihomo-cli-sub.timer")
 	} else {
 		_, _ = runRoot("systemctl", "disable", "--now", "mihomo-cli-sub.timer")
@@ -154,7 +154,7 @@ WantedBy=timers.target
 	if err != nil {
 		return err
 	}
-	if s.AutoSelect {
+	if s.AutoSelectEnabled {
 		_, err = runRoot("systemctl", "enable", "--now", "mihomo-cli-auto.timer")
 	} else {
 		_, _ = runRoot("systemctl", "disable", "--now", "mihomo-cli-auto.timer")

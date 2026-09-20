@@ -9,7 +9,6 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
-	"text/tabwriter"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -17,8 +16,10 @@ import (
 	"github.com/wubinstu/mihomo-cli/internal/api"
 	"github.com/wubinstu/mihomo-cli/internal/app"
 	"github.com/wubinstu/mihomo-cli/internal/core"
+	"github.com/wubinstu/mihomo-cli/internal/i18n"
 	"github.com/wubinstu/mihomo-cli/internal/render"
 	"github.com/wubinstu/mihomo-cli/internal/sysd"
+	"github.com/wubinstu/mihomo-cli/internal/ui"
 )
 
 // ---- conn ----
@@ -48,20 +49,22 @@ func printConns(c *api.Client) error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("活动连接: %d  累计 ↑%s ↓%s\n", len(r.Connections), humanBytes(r.UploadTotal), humanBytes(r.DownloadTotal))
-	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(w, "网络\t目标\t代理链\t↑\t↓")
+	fmt.Printf("%s: %d  %s ↑%s ↓%s\n", T("conn.active"), len(r.Connections), T("conn.acc"),
+		humanBytes(r.UploadTotal), humanBytes(r.DownloadTotal))
+	rows := [][]string{strings.Split(T("conn.hdr"), "\t")}
 	for _, cn := range r.Connections {
 		host := cn.Metadata.Host
 		if host == "" {
 			host = cn.Metadata.Destination
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
+		rows = append(rows, []string{
 			cn.Metadata.Network, host,
 			strings.Join(cn.Chains, "/"),
-			humanBytes(cn.Upload), humanBytes(cn.Download))
+			humanBytes(cn.Upload), humanBytes(cn.Download),
+		})
 	}
-	return w.Flush()
+	ui.Table(os.Stdout, rows, 2)
+	return nil
 }
 
 // ---- traffic ----
@@ -76,7 +79,7 @@ var trafficCmd = &cobra.Command{
 			return err
 		}
 		defer resp.Body.Close()
-		fmt.Println("实时流量 (每秒):")
+		fmt.Println(T("tr.title"))
 		sc := bufio.NewScanner(resp.Body)
 		for sc.Scan() {
 			var t struct {
@@ -169,55 +172,67 @@ var doctorCmd = &cobra.Command{
 		}
 		// 目录
 		err := app.EnsureDirs()
-		fmt.Printf("%s 数据目录 %s\n", ok(err == nil), app.BaseDir)
+		fmt.Printf("%s %-14s %s\n", ok(err == nil), T("dr.dir"), app.BaseDir)
 		// 内核
 		v, err := core.Version()
-		fmt.Printf("%s 内核     %s\n", ok(err == nil), orDash(v, err))
+		fmt.Printf("%s %-14s %s\n", ok(err == nil), T("dr.core"), orDash(v, err))
 		// 订阅
 		var pinfo string
 		if p := s.Current(); p != nil {
-			pinfo = fmt.Sprintf("%s (%d 节点, 更新于 %s)", p.Name, p.Nodes, humanTime(p.UpdatedAt))
+			pinfo = fmt.Sprintf("%s (%d nodes, %s)", p.Name, p.Nodes, humanTime(p.UpdatedAt))
 		}
-		fmt.Printf("%s 订阅     %s\n", ok(s.Current() != nil), orDash(pinfo, nil))
+		fmt.Printf("%s %-14s %s\n", ok(s.Current() != nil), T("dr.sub"), orDash(pinfo, nil))
 		// 运行配置
 		_, err = os.Stat(app.RuntimeConfig)
-		fmt.Printf("%s 运行配置 %s\n", ok(err == nil), app.RuntimeConfig)
+		fmt.Printf("%s %-14s %s\n", ok(err == nil), T("dr.rt"), app.RuntimeConfig)
 		// 服务
 		active := sysd.IsActive()
-		fmt.Printf("%s 服务     %s\n", ok(active), map[bool]string{true: "运行中", false: "未运行 (mihomo-cli start)"}[active])
+		svc := T("svc.running")
+		if !active {
+			svc = T("svc.start.hint")
+		}
+		fmt.Printf("%s %-14s %s\n", ok(active), T("dr.svc"), svc)
 		// API
 		var apiInfo string
 		ver, err := api.New(s).Version()
 		if err == nil {
-			apiInfo = "API 正常, 内核 " + ver
+			apiInfo = T("dr.api.ok") + ver
 		}
-		fmt.Printf("%s 控制API  %s\n", ok(err == nil), orDash(apiInfo, err))
+		fmt.Printf("%s %-14s %s\n", ok(err == nil), T("dr.api"), orDash(apiInfo, err))
 		// 代理端口
 		live := portOpen(fmt.Sprintf("127.0.0.1:%d", s.MixedPort))
-		fmt.Printf("%s 代理端口 127.0.0.1:%d %s\n", ok(live), s.MixedPort, map[bool]string{true: "监听中", false: "未监听"}[live])
+		fmt.Printf("%s %-14s 127.0.0.1:%d %s\n", ok(live), T("dr.port"), s.MixedPort, listenWord(live))
 		if s.AllowLan {
 			live2 := portOpen(fmt.Sprintf("0.0.0.0:%d", s.MixedPort))
-			fmt.Printf("%s 局域网   0.0.0.0:%d %s (其他设备代理地址 http://%s:%d)\n",
-				ok(live2), s.MixedPort, map[bool]string{true: "监听中", false: "未监听"}[live2], lanIP(), s.MixedPort)
+			fmt.Printf("%s %-14s 0.0.0.0:%d %s (LAN: http://%s:%d)\n",
+				ok(live2), T("dr.lan"), s.MixedPort, listenWord(live2), lanIP(), s.MixedPort)
 		}
 		// 定时器
 		subOn := sysd.TimerEnabled("mihomo-cli-sub.timer")
-		fmt.Printf("%s 订阅自动更新 %s (周期 %s)\n", ok(subOn == s.SubAutoUpdate),
-			onOff(subOn), s.SubInterval)
+		fmt.Printf("%s %-14s %s (%s %s)\n", ok(subOn == s.SubAutoUpdateEnabled),
+			T("dr.subau"), onOff(subOn), T("dr.period"), s.SubAutoUpdateInterval)
 		autoOn := sysd.TimerEnabled("mihomo-cli-auto.timer")
-		fmt.Printf("%s 自动择优节点 %s (周期 %s, 分组 %s)\n", ok(autoOn == s.AutoSelect),
-			onOff(autoOn), s.AutoInterval, orDash(strings.Join(s.AutoGroups, ","), nil))
+		fmt.Printf("%s %-14s %s (%s %s, %s %s)\n", ok(autoOn == s.AutoSelectEnabled),
+			T("dr.auto"), onOff(autoOn), T("dr.period"), s.AutoSelectInterval,
+			T("dr.groups"), orDash(strings.Join(s.AutoGroups, ","), nil))
 		// 直连测试
-		fmt.Println("提示: 使用 curl -I https://www.google.com 验证代理是否生效 (先 eval $(mihomo-cli env))")
+		fmt.Println(T("dr.hint"))
 		return nil
 	},
 }
 
 func onOff(b bool) string {
 	if b {
-		return "已启用"
+		return T("dr.timer.on")
 	}
-	return "已停用"
+	return T("dr.timer.off")
+}
+
+func listenWord(live bool) string {
+	if live {
+		return "LISTEN"
+	}
+	return "-"
 }
 
 func orDash(s string, err error) string {
@@ -239,30 +254,50 @@ func portOpen(addr string) bool {
 	return true
 }
 
-// ---- set ----
+// ---- set / get ----
 
 var setCmd = &cobra.Command{
 	Use:   "set <key> <value>",
 	Short: "修改设置并生效",
 	Long: `可配置项:
-  allow-lan <true|false>     允许局域网设备使用代理 (0.0.0.0)
-  mixed-port <port>          混合代理端口 (默认 7890)
-  sub-auto-update <bool>     订阅自动更新开关
-  sub-interval <duration>    订阅自动更新周期, 如 12h / 30m
-  auto-select <bool>         自动切换到最低延迟节点
-  auto-interval <duration>   自动择优周期, 如 15m
-  auto-groups <g1,g2>        自动择优作用的分组 (空=全部 Selector)
-  test-url <url>             测速 URL
-  test-timeout <ms>          测速超时(毫秒)
-  download-proxy <url>       下载内核/订阅使用的代理 (空=直连)`,
+  lang <zh|en>                     输出语言 (默认按系统 locale, 回退中文)
+  allow-lan <true|false>           允许局域网设备使用代理 (0.0.0.0)
+  mixed-port <port>                混合代理端口 (默认 7890)
+  sub-auto-update-enabled <bool>   订阅自动更新开关
+  sub-auto-update-interval <dur>   订阅自动更新周期, 如 12h / 30m
+  auto-select-enabled <bool>       自动切换到最低延迟节点
+  auto-select-interval <dur>       自动择优周期, 如 15m
+  auto-groups <g1,g2>              自动择优作用的分组 (空=全部含真实节点的分组)
+  test-url <url>                   测速 URL
+  test-timeout <ms>                测速超时(毫秒)
+  download-proxy <url>             下载内核/订阅使用的代理 (空=直连)
+
+旧键名 sub-auto-update / sub-interval / auto-select / auto-interval 仍被接受。`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		s := mustSettings()
 		k, v := args[0], args[1]
+		// 兼容旧键名
+		switch k {
+		case "sub-auto-update":
+			k = "sub-auto-update-enabled"
+		case "sub-interval":
+			k = "sub-auto-update-interval"
+		case "auto-select":
+			k = "auto-select-enabled"
+		case "auto-interval":
+			k = "auto-select-interval"
+		}
 		b := func() bool {
 			return v == "true" || v == "on" || v == "yes" || v == "1"
 		}
 		switch k {
+		case "lang":
+			if v != "zh" && v != "en" {
+				return fmt.Errorf("lang 仅支持 zh / en")
+			}
+			s.Lang = v
+			i18n.Set(v)
 		case "allow-lan":
 			s.AllowLan = b()
 		case "mixed-port":
@@ -271,22 +306,22 @@ var setCmd = &cobra.Command{
 				return fmt.Errorf("无效端口")
 			}
 			s.MixedPort = n
-		case "sub-auto-update":
-			s.SubAutoUpdate = b()
-		case "sub-interval":
+		case "sub-auto-update-enabled":
+			s.SubAutoUpdateEnabled = b()
+		case "sub-auto-update-interval":
 			d, err := time.ParseDuration(v)
 			if err != nil || d < time.Minute {
 				return fmt.Errorf("无效周期 (>=1m), 如 12h")
 			}
-			s.SubInterval = d
-		case "auto-select":
-			s.AutoSelect = b()
-		case "auto-interval":
+			s.SubAutoUpdateInterval = d
+		case "auto-select-enabled":
+			s.AutoSelectEnabled = b()
+		case "auto-select-interval":
 			d, err := time.ParseDuration(v)
 			if err != nil || d < time.Minute {
 				return fmt.Errorf("无效周期 (>=1m), 如 15m")
 			}
-			s.AutoInterval = d
+			s.AutoSelectInterval = d
 		case "auto-groups":
 			if v == "" {
 				s.AutoGroups = nil
@@ -309,7 +344,7 @@ var setCmd = &cobra.Command{
 		if err := s.Save(); err != nil {
 			return err
 		}
-		fmt.Printf("%s = %s (已保存)\n", k, v)
+		fmt.Printf("%s = %s %s\n", k, v, T("set.saved"))
 		// 重建运行配置 + 定时器 + 热重载
 		if s.Current() != nil {
 			if err := render.Generate(s); err == nil {
@@ -320,6 +355,47 @@ var setCmd = &cobra.Command{
 			fmt.Fprintf(os.Stderr, "警告: 更新定时器失败: %v\n", err)
 		}
 		return nil
+	},
+}
+
+var getCmd = &cobra.Command{
+	Use:   "get [key]",
+	Short: "查看设置 (无参数 = 全部)",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		s := mustSettings()
+		lang := s.Lang
+		if lang == "" {
+			lang = i18n.Lang() + " (auto)"
+		}
+		all := [][2]string{
+			{"lang", lang},
+			{"allow-lan", fmt.Sprintf("%v", s.AllowLan)},
+			{"mixed-port", fmt.Sprintf("%d", s.MixedPort)},
+			{"sub-auto-update-enabled", fmt.Sprintf("%v", s.SubAutoUpdateEnabled)},
+			{"sub-auto-update-interval", s.SubAutoUpdateInterval.String()},
+			{"auto-select-enabled", fmt.Sprintf("%v", s.AutoSelectEnabled)},
+			{"auto-select-interval", s.AutoSelectInterval.String()},
+			{"auto-groups", strings.Join(s.AutoGroups, ",")},
+			{"test-url", s.TestURL},
+			{"test-timeout", fmt.Sprintf("%dms", s.TestTimeout)},
+			{"download-proxy", s.DownloadProxy},
+			{"current-profile", s.CurrentProfile},
+		}
+		if len(args) == 0 {
+			rows := [][]string{{"KEY", "VALUE"}}
+			for _, e := range all {
+				rows = append(rows, []string{e[0], e[1]})
+			}
+			ui.Table(os.Stdout, rows, 3)
+			return nil
+		}
+		for _, e := range all {
+			if e[0] == args[0] {
+				fmt.Println(e[1])
+				return nil
+			}
+		}
+		return fmt.Errorf("未知配置项 %q", args[0])
 	},
 }
 
@@ -374,7 +450,7 @@ var coreRollbackCmd = &cobra.Command{
 
 // ---- version ----
 
-var Version = "dev"
+var Version = "0.1.0"
 
 var versionCmd = &cobra.Command{
 	Use: "version",
@@ -400,5 +476,5 @@ func init() {
 	logCmd.Flags().BoolVarP(&logFollow, "follow", "f", false, "跟随日志")
 	envCmd.Flags().BoolVar(&envUnset, "unset", false, "输出 unset 命令")
 	coreCmd.AddCommand(coreVersionCmd, coreUpgradeCmd, coreRollbackCmd)
-	rootCmd.AddCommand(connCmd, trafficCmd, logCmd, envCmd, doctorCmd, setCmd, coreCmd, versionCmd)
+	rootCmd.AddCommand(connCmd, trafficCmd, logCmd, envCmd, doctorCmd, setCmd, getCmd, coreCmd, versionCmd)
 }

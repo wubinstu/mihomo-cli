@@ -20,6 +20,7 @@ type Profile struct {
 
 // Settings cli 自身配置 (config.toml)
 type Settings struct {
+	Lang           string `toml:"lang"` // "zh" | "en"; 空则按 $LANG 自动判断
 	CurrentProfile string `toml:"current_profile"`
 	DownloadProxy  string `toml:"download_proxy"` // 下载内核/订阅时使用的代理, 空则直连
 
@@ -32,29 +33,29 @@ type Settings struct {
 	APISecret string `toml:"api_secret"`
 
 	// 订阅自动更新
-	SubAutoUpdate bool          `toml:"sub_auto_update"`
-	SubInterval   time.Duration `toml:"sub_interval"` // 默认 24h
+	SubAutoUpdateEnabled bool          `toml:"sub_auto_update_enabled"`
+	SubAutoUpdateInterval time.Duration `toml:"sub_auto_update_interval"` // 默认 24h
 
 	// 自动测速并切换到最低延迟节点
-	AutoSelect   bool          `toml:"auto_select"`
-	AutoInterval time.Duration `toml:"auto_interval"` // 默认 30m
-	AutoGroups   []string      `toml:"auto_groups"`   // 生效分组, 空 = 所有 Selector 分组
-	TestURL      string        `toml:"test_url"`
-	TestTimeout  int           `toml:"test_timeout_ms"` // 默认 5000
+	AutoSelectEnabled bool          `toml:"auto_select_enabled"`
+	AutoSelectInterval time.Duration `toml:"auto_select_interval"` // 默认 30m
+	AutoGroups        []string      `toml:"auto_groups"`           // 生效分组, 空 = 所有含真实节点的 Selector 分组
+	TestURL           string        `toml:"test_url"`
+	TestTimeout       int           `toml:"test_timeout_ms"` // 默认 5000
 
 	Profiles []Profile `toml:"profiles"`
 }
 
 func DefaultSettings() *Settings {
 	return &Settings{
-		MixedPort:     7890,
-		APIBase:       "http://127.0.0.1:9090",
-		SubAutoUpdate: true,
-		SubInterval:   24 * time.Hour,
-		AutoSelect:    false,
-		AutoInterval:  30 * time.Minute,
-		TestURL:       "https://www.gstatic.com/generate_204",
-		TestTimeout:   5000,
+		MixedPort:            7890,
+		APIBase:              "http://127.0.0.1:9090",
+		SubAutoUpdateEnabled: true,
+		SubAutoUpdateInterval: 24 * time.Hour,
+		AutoSelectEnabled:    false,
+		AutoSelectInterval:   30 * time.Minute,
+		TestURL:              "https://www.gstatic.com/generate_204",
+		TestTimeout:          5000,
 	}
 }
 
@@ -81,11 +82,11 @@ func LoadSettings() (*Settings, error) {
 	if s.APISecret == "" {
 		s.APISecret = randSecret()
 	}
-	if s.SubInterval <= 0 {
-		s.SubInterval = 24 * time.Hour
+	if s.SubAutoUpdateInterval <= 0 {
+		s.SubAutoUpdateInterval = 24 * time.Hour
 	}
-	if s.AutoInterval <= 0 {
-		s.AutoInterval = 30 * time.Minute
+	if s.AutoSelectInterval <= 0 {
+		s.AutoSelectInterval = 30 * time.Minute
 	}
 	if s.TestURL == "" {
 		s.TestURL = "https://www.gstatic.com/generate_204"

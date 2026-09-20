@@ -38,30 +38,42 @@ mihomo-cli install [--proxy http://host:port] [--sub <订阅URL>] [--allow-lan]
 mihomo-cli start|stop|restart|status    服务生命周期
 mihomo-cli run                          前台运行(调试)
 mihomo-cli sub add|rm|list|update|use   订阅管理
-mihomo-cli proxy                        查看分组
+mihomo-cli proxy                        查看分组 (CJK 宽度对齐)
 mihomo-cli proxy set <组> <节点>         切换节点(模糊匹配)
 mihomo-cli proxy test [组]              节点测速
 mihomo-cli proxy auto                   立即择优一次
+mihomo-cli proxy on/off                 开/关当前 shell 代理(配合 alias)
 mihomo-cli conn [--watch]               活动连接
 mihomo-cli traffic                      实时流量
 mihomo-cli log [-f]                     内核日志
 mihomo-cli core upgrade|rollback        内核升级/回滚
 mihomo-cli env [--unset]                代理环境变量
 mihomo-cli doctor                       体检
+mihomo-cli get/set [key]                查看/修改设置
 mihomo-cli uninstall [--purge]          卸载
 ```
 
-## 配置 (`mihomo-cli set key value`)
+推荐 alias（加到 `~/.bashrc`）:
+
+```bash
+alias proxy_on='eval $(mihomo-cli proxy on)'
+alias proxy_off='eval $(mihomo-cli proxy off)'
+```
+
+bash/zsh/fish 补全脚本随 `install` 自动安装、随 `uninstall` 清理。
+
+## 配置 (`mihomo-cli get [key]` / `mihomo-cli set key value`)
 
 | key | 说明 | 默认 |
 |---|---|---|
+| `lang` | 输出语言 `zh`/`en` | 按系统 locale, 回退中文 |
 | `allow-lan` | 允许局域网设备使用代理 (0.0.0.0) | `false` |
 | `mixed-port` | 混合代理端口 (http+socks5) | `7890` |
-| `sub-auto-update` | 订阅定时自动更新 | `true` |
-| `sub-interval` | 订阅更新周期 (如 `12h`) | `24h` |
-| `auto-select` | 自动切换到最低延迟节点 | `false` |
-| `auto-interval` | 自动择优周期 (如 `15m`) | `30m` |
-| `auto-groups` | 择优作用的分组, 逗号分隔 (空=全部手动分组) | 空 |
+| `sub-auto-update-enabled` | 订阅定时自动更新 | `true` |
+| `sub-auto-update-interval` | 订阅更新周期 (如 `12h`) | `24h` |
+| `auto-select-enabled` | 自动切换到最低延迟节点 | `false` |
+| `auto-select-interval` | 自动择优周期 (如 `15m`) | `30m` |
+| `auto-groups` | 择优作用的分组, 逗号分隔 (空=全部含真实节点的分组) | 空 |
 | `test-url` / `test-timeout` | 测速 URL / 超时 ms | gstatic 204 / 5000 |
 | `download-proxy` | 下载内核/订阅使用的代理 | 直连 |
 

@@ -32,7 +32,8 @@ func serviceAction(action string) error {
 	if err := sysd.Service(action); err != nil {
 		return err
 	}
-	fmt.Printf("服务已 %s\n", action)
+	m := map[string]string{"start": T("svc.start"), "stop": T("svc.stop"), "restart": T("svc.restart")}
+	fmt.Println(m[action])
 	return nil
 }
 
@@ -46,24 +47,32 @@ var statusCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		s := mustSettings()
 		active := sysd.IsActive()
-		fmt.Printf("服务状态 : %s\n", map[bool]string{true: "运行中", false: "未运行"}[active])
+		state := T("svc.stopped")
+		if active {
+			state = T("svc.running")
+		}
+		fmt.Printf("%-10s %s\n", T("st.service"), state)
 		if active {
 			c := api.New(s)
 			if v, err := c.Version(); err == nil {
-				fmt.Printf("内核版本 : %s\n", v)
+				fmt.Printf("%-10s %s\n", T("st.corever"), v)
 			}
 			if ps, err := c.Proxies(); err == nil {
-				mode := "规则"
+				mode := "rule"
 				if p, ok := ps.Proxies["GLOBAL"]; ok && p.Now != "" {
 					mode = p.Now
 				}
-				fmt.Printf("代理模式 : %s\n", mode)
+				fmt.Printf("%-10s %s\n", T("st.mode"), mode)
 			}
 		}
-		fmt.Printf("混合端口 : %d (http+socks5)\n", s.MixedPort)
-		fmt.Printf("局域网   : %s\n", map[bool]string{true: "允许 (0.0.0.0)", false: "仅本机 (127.0.0.1)"}[s.AllowLan])
+		fmt.Printf("%-10s %d %s\n", T("st.port"), s.MixedPort, T("st.port.hint"))
+		lan := T("st.lan.off")
+		if s.AllowLan {
+			lan = T("st.lan.on")
+		}
+		fmt.Printf("%-10s %s\n", T("st.lan"), lan)
 		if p := s.Current(); p != nil {
-			fmt.Printf("当前订阅 : %s (%d 节点, 更新于 %s)\n", p.Name, p.Nodes, p.UpdatedAt.Format("2006-01-02 15:04"))
+			fmt.Printf("%-10s %s (%d nodes, %s)\n", T("st.sub"), p.Name, p.Nodes, p.UpdatedAt.Format("2006-01-02 15:04"))
 		}
 		return nil
 	},

@@ -10,6 +10,9 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/wubinstu/mihomo-cli/internal/api"
+	"github.com/wubinstu/mihomo-cli/internal/render"
+	"github.com/wubinstu/mihomo-cli/internal/sysd"
+	"github.com/wubinstu/mihomo-cli/internal/ui"
 )
 
 func groupType(p api.Proxy) bool {
@@ -29,7 +32,6 @@ var proxyCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		// 收集分组并按配置顺序难以获取, 按字母序
 		names := make([]string, 0)
 		for n, p := range ps.Proxies {
 			if groupType(p) {
@@ -37,13 +39,13 @@ var proxyCmd = &cobra.Command{
 			}
 		}
 		sort.Strings(names)
-		w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-		fmt.Fprintln(w, "分组\t类型\t当前节点\t节点数")
+		rows := [][]string{strings.Split(T("proxy.hdr"), "\t")}
 		for _, n := range names {
 			p := ps.Proxies[n]
-			fmt.Fprintf(w, "%s\t%s\t%s\t%d\n", n, p.Type, p.Now, len(p.All))
+			rows = append(rows, []string{n, p.Type, p.Now, fmt.Sprintf("%d", len(p.All))})
 		}
-		return w.Flush()
+		ui.Table(os.Stdout, rows, 2)
+		return nil
 	},
 }
 
@@ -131,12 +133,12 @@ var proxyTestCmd = &cobra.Command{
 		}
 		sort.Slice(list, func(i, j int) bool { return list[i].d < list[j].d })
 		w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-		fmt.Fprintln(w, "延迟\t节点")
+		fmt.Fprintln(w, "ms\tNODE")
 		for _, e := range list {
-			fmt.Fprintf(w, "%d ms\t%s\n", e.d, e.name)
+			fmt.Fprintf(w, "%d\t%s\n", e.d, e.name)
 		}
 		if n := len(ps.Proxies[group].All) - len(list); n > 0 {
-			fmt.Fprintf(w, "超时/失败\t(%d 个)\n", n)
+			fmt.Fprintf(w, "timeout\t(%d)\n", n)
 		}
 		return w.Flush()
 	},
@@ -279,7 +281,41 @@ func matchName(proxies map[string]api.Proxy, want string, onlyGroup bool) string
 	return want // 未命中, 返回原值让调用方报错
 }
 
+// proxyOnCmd 开启代理: 确保服务运行, 输出可 eval 的环境变量
+// 推荐 alias: alias proxy_on='eval $(mihomo-cli proxy on)'
+var proxyOnCmd = &cobra.Command{
+	Use:   "on",
+	Short: "开启代理: 启动服务并输出代理环境变量 (eval $(mihomo-cli proxy on))",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		s := mustSettings()
+		if !sysd.IsActive() {
+			if s.Current() == nil {
+				return fmt.Errorf("没有订阅, 请先 mihomo-cli init")
+			}
+			if err := render.Generate(s); err != nil {
+				return err
+			}
+			if err := sysd.Service("start"); err != nil {
+				return err
+			}
+			fmt.Fprintln(os.Stderr, T("proxy.on"))
+		}
+		return envCmd.RunE(envCmd, args)
+	},
+}
+
+// proxyOffCmd 关闭当前 shell 的代理环境变量 (服务保持运行)
+// 推荐 alias: alias proxy_off='eval $(mihomo-cli proxy off)'
+var proxyOffCmd = &cobra.Command{
+	Use:   "off",
+	Short: "关闭当前 shell 的代理环境变量 (服务保持运行)",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		fmt.Println(`unset http_proxy https_proxy all_proxy HTTP_PROXY HTTPS_PROXY ALL_PROXY`)
+		return nil
+	},
+}
+
 func init() {
-	proxyCmd.AddCommand(proxySetCmd, proxyTestCmd, proxyAutoCmd)
+	proxyCmd.AddCommand(proxySetCmd, proxyTestCmd, proxyAutoCmd, proxyOnCmd, proxyOffCmd)
 	rootCmd.AddCommand(proxyCmd)
 }

@@ -3,13 +3,13 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"text/tabwriter"
 	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/wubinstu/mihomo-cli/internal/render"
 	"github.com/wubinstu/mihomo-cli/internal/subs"
+	"github.com/wubinstu/mihomo-cli/internal/ui"
 )
 
 var subAddName string
@@ -58,20 +58,21 @@ var subListCmd = &cobra.Command{
 	Short: "列出全部订阅",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		s := mustSettings()
-		w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-		fmt.Fprintln(w, "当前\t名称\t节点数\t更新时间\t流量信息\tURL")
+		rows := [][]string{{"*", "NAME", "NODES", "UPDATED", "QUOTA", "URL"}}
 		for i := range s.Profiles {
 			p := &s.Profiles[i]
 			cur := ""
 			if p.Name == s.CurrentProfile {
 				cur = "*"
 			}
-			fmt.Fprintf(w, "%s\t%s\t%d\t%s\t%s\t%s\n",
-				cur, p.Name, p.Nodes,
-				p.UpdatedAt.Format("2006-01-02 15:04"),
-				shorten(p.UserInfo, 32), shorten(p.URL, 40))
+			rows = append(rows, []string{
+				cur, p.Name, fmt.Sprintf("%d", p.Nodes),
+				humanTime(p.UpdatedAt),
+				shorten(p.UserInfo, 32), shorten(p.URL, 40),
+			})
 		}
-		return w.Flush()
+		ui.Table(os.Stdout, rows, 2)
+		return nil
 	},
 }
 

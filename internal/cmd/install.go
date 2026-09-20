@@ -1,8 +1,12 @@
 package cmd
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"syscall"
 
@@ -89,6 +93,7 @@ var installCmd = &cobra.Command{
 		if err := sysd.InstallTimers(s); err != nil {
 			fmt.Fprintf(os.Stderr, "警告: 定时任务安装失败: %v\n", err)
 		}
+		installCompletions()
 
 		fmt.Println(`
 安装完成。后续步骤:
@@ -100,6 +105,81 @@ var installCmd = &cobra.Command{
 	},
 }
 
+// installCompletions 为已安装的 shell 安装补全脚本 (跟随 mihomo-cli install)
+func installCompletions() {
+	type target struct {
+		dir  string
+		file string
+		gen  func(w io.Writer) error
+	}
+	self, _ := os.Executable()
+	_ = self
+	targets := []target{
+		{"/usr/local/share/bash-completion/completions", "mihomo-cli", func(w io.Writer) error { return rootCmd.GenBashCompletionV2(w, false) }},
+		{"/usr/local/share/zsh/site-functions", "_mihomo-cli", func(w io.Writer) error { return rootCmd.GenZshCompletion(w) }},
+		{"/usr/local/share/fish/completions", "mihomo-cli.fish", func(w io.Writer) error { return rootCmd.GenFishCompletion(w, false) }},
+	}
+	home, _ := os.UserHomeDir()
+	fallbacks := map[int]string{
+		0: home + "/.local/share/bash-completion/completions",
+		1: home + "/.local/share/zsh/site-functions",
+		2: home + "/.config/fish/completions",
+	}
+	for i, t := range targets {
+		dir := t.dir
+		if _, err := os.Stat(t.dir); err != nil {
+			dir = fallbacks[i]
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				continue
+			}
+		}
+		if dir == t.dir && os.Geteuid() != 0 {
+			// 系统目录需要 root: sudo tee
+			var buf bytes.Buffer
+			if t.gen(&buf) != nil {
+				continue
+			}
+			c := exec.Command("sudo", "tee", filepath.Join(dir, t.file))
+			c.Stdin = &buf
+			c.Stdout = nil
+			c.Stderr = os.Stderr
+			if c.Run() == nil {
+				fmt.Printf("补全已安装: %s\n", filepath.Join(dir, t.file))
+			}
+			continue
+		}
+		f, err := os.Create(filepath.Join(dir, t.file))
+		if err != nil {
+			continue
+		}
+		if err := t.gen(f); err == nil {
+			fmt.Printf("补全已安装: %s\n", filepath.Join(dir, t.file))
+		}
+		f.Close()
+	}
+}
+
+// removeCompletions 清理补全脚本 (跟随 uninstall)
+func removeCompletions() {
+	home, _ := os.UserHomeDir()
+	for _, p := range []string{
+		"/usr/local/share/bash-completion/completions/mihomo-cli",
+		"/usr/local/share/zsh/site-functions/_mihomo-cli",
+		"/usr/local/share/fish/completions/mihomo-cli.fish",
+		home + "/.local/share/bash-completion/completions/mihomo-cli",
+		home + "/.local/share/zsh/site-functions/_mihomo-cli",
+		home + "/.config/fish/completions/mihomo-cli.fish",
+	} {
+		if _, err := os.Stat(p); err == nil {
+			if os.Geteuid() == 0 {
+				_ = os.Remove(p)
+			} else {
+				_ = exec.Command("sudo", "rm", "-f", p).Run()
+			}
+		}
+	}
+}
+
 var uninstallPurge bool
 
 var uninstallCmd = &cobra.Command{
@@ -108,6 +188,7 @@ var uninstallCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		fmt.Println("停止并移除 systemd 单元 ...")
 		sysd.RemoveAll()
+		removeCompletions()
 		if uninstallPurge {
 			home, _ := os.UserHomeDir()
 			fmt.Printf("删除 %s ...\n", app.BaseDir)

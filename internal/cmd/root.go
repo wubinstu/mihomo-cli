@@ -5,7 +5,12 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+
+	"github.com/wubinstu/mihomo-cli/internal/i18n"
 )
+
+// T 输出文案(跟随 lang 设置)
+func T(key string) string { return i18n.T(key) }
 
 var rootCmd = &cobra.Command{
 	Use:   "mihomo-cli",
