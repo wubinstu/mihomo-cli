@@ -35,8 +35,8 @@ mihomo-cli doctor               # 体检 (所有用户可查)
 ```
 
 - 三层均支持 `#id` 索引别名 (`sub use 1` / `group use 8` / `node use 5`), emoji 组名免输入。
-- `unuse` 悬空语义: `sub unuse` 停止代理服务(网络不再被代理)并级联清空 group/node;
-  `group/node unuse` 将该分组切换为 DIRECT(流量直连)。
+- `unuse` 悬空语义(三层统一, **服务永不停止**): 内核切换到空配置(`mode: direct`),
+  所有流量直连, 代理端口仍可用; `sub rm` 删掉唯一订阅时同样处理。
 - 概念说明: 规则模式下不同流量按规则走不同分组(国内直连、国外走代理), 多个分组同时生效;
   `group/node use` 设置的是「当前操作的分组上下文」及其选中节点。
 

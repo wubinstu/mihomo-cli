@@ -24,7 +24,29 @@ func DeepMerge(dst, src map[string]any) {
 }
 
 // Generate 将「当前订阅 + overrides.yaml + 运行时注入项」合成为 runtime/config.yaml
+// 无生效订阅时生成空配置(mode: direct): 服务保持运行, 全部流量直连
 func Generate(s *app.Settings) error {
+	if err := app.EnsureDirs(); err != nil {
+		return err
+	}
+	if s.Current() == nil {
+		minimal := map[string]any{
+			"mixed-port":           s.MixedPort,
+			"allow-lan":            s.AllowLan,
+			"mode":                 "direct",
+			"log-level":            "info",
+			"external-controller":  "127.0.0.1:9090",
+			"secret":               s.APISecret,
+		}
+		if s.AllowLan {
+			minimal["bind-address"] = "*"
+		}
+		out, err := yaml.Marshal(minimal)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(app.RuntimeConfig, out, 0o644)
+	}
 	p := s.Current()
 	if p == nil {
 		return fmt.Errorf("%s", i18n.T("没有可用订阅, 请先执行 mihomo-cli init 或 mihomo-cli sub add"))
@@ -69,8 +91,5 @@ func Generate(s *app.Settings) error {
 	if err != nil {
 		return err
 	}
-	if err := app.EnsureDirs(); err != nil {
-		return err
-	}
-	return os.WriteFile(app.RuntimeConfig, out, 0o600)
+	return os.WriteFile(app.RuntimeConfig, out, 0o644)
 }

@@ -127,11 +127,8 @@ func (s *Settings) FindProfile(name string) *Profile {
 	return nil
 }
 
-// Current 返回当前生效的订阅, 不存在则返回 nil
+// Current 返回当前生效的订阅 (current_profile 为空时悬空, 返回 nil)
 func (s *Settings) Current() *Profile {
-	if s.CurrentProfile == "" && len(s.Profiles) > 0 {
-		return &s.Profiles[0]
-	}
 	return s.FindProfile(s.CurrentProfile)
 }
 

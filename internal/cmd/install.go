@@ -20,7 +20,7 @@ import (
 	"github.com/wubinstu/mihomo-cli/internal/sysd"
 )
 
-// reloadIfActive 服务运行中则热重载配置
+// reloadIfActive 服务运行中则热重载配置, 否则提示
 func reloadIfActive(s *app.Settings) {
 	if sysd.IsActive() {
 		if err := api.New(s).Reload(app.RuntimeConfig); err != nil {
@@ -28,6 +28,8 @@ func reloadIfActive(s *app.Settings) {
 		} else {
 			fmt.Println(T("已热重载配置"))
 		}
+	} else {
+		fmt.Println(T("服务未运行, 已跳过热重载 (mihomo-cli start)"))
 	}
 }
 

@@ -15,7 +15,6 @@ import (
 	"github.com/wubinstu/mihomo-cli/internal/ui"
 )
 
-var subAddName string
 
 var subCmd = &cobra.Command{
 	Use:   "sub",
@@ -43,15 +42,15 @@ func subListRun(cmd *cobra.Command, args []string) error {
 }
 
 var subAddCmd = &cobra.Command{
-	Use:   "add <url>",
+	Use:   "add <name> <url>",
 	Short: T("添加订阅"),
-	Args:  cobra.ExactArgs(1),
+	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		s := mustSettings()
-		if err := subs.Add(s, subAddName, args[0]); err != nil {
+		if err := subs.Add(s, args[0], args[1]); err != nil {
 			return err
 		}
-		fmt.Printf("%s [%s] %s\n", T("订阅"), subs.Sanitize(subAddName), T("已添加并生效"))
+		fmt.Printf("%s [%s] %s\n", T("订阅"), subs.Sanitize(args[0]), T("已添加并生效"))
 		if err := render.Generate(s); err != nil {
 			return err
 		}
@@ -74,12 +73,21 @@ var subRmCmd = &cobra.Command{
 		if err := subs.Remove(s, name); err != nil {
 			return err
 		}
-		if s.Current() != nil {
+		// 删除后无生效订阅: 内核切空配置(全部 DIRECT), 服务保持运行
+		if s.Current() == nil {
+			s.CurrentGroup = ""
+			_ = s.Save()
 			if err := render.Generate(s); err != nil {
 				return err
 			}
 			reloadIfActive(s)
+			fmt.Println(T("已删除") + "; " + T("已悬空: 内核以空配置运行, 全部流量 DIRECT (服务保持运行)"))
+			return nil
 		}
+		if err := render.Generate(s); err != nil {
+			return err
+		}
+		reloadIfActive(s)
 		fmt.Println(T("已删除"))
 		return nil
 	},
@@ -145,13 +153,13 @@ var subUseCmd = &cobra.Command{
 	},
 }
 
-// subUnuseCmd 取消当前订阅: 停止代理服务(网络不再被代理), group/node 级联悬空
+// subUnuseCmd 取消当前订阅: 内核切换到空配置(全部流量 DIRECT), 服务保持运行, group/node 级联悬空
 var subUnuseCmd = &cobra.Command{
 	Use:   "unuse",
-	Short: T("取消当前订阅: 停止代理服务, group/node 级联悬空"),
+	Short: T("取消当前订阅: 内核空配置运行(全部 DIRECT), 服务保持运行"),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		s := mustSettings()
-		if s.CurrentProfile == "" && s.Current() == nil {
+		if s.Current() == nil {
 			fmt.Println(T("当前订阅已是悬空状态"))
 			return nil
 		}
@@ -160,12 +168,18 @@ var subUnuseCmd = &cobra.Command{
 		if err := s.Save(); err != nil {
 			return err
 		}
-		if sysd.IsActive() {
-			if err := sysd.Service("stop"); err != nil {
-				return err
-			}
+		if err := render.Generate(s); err != nil {
+			return err
 		}
-		fmt.Println(T("代理服务已停止, 网络不再被代理"))
+		if sysd.IsActive() {
+			reloadIfActive(s)
+			fmt.Println(T("已悬空: 内核以空配置运行, 全部流量 DIRECT (服务保持运行)"))
+		} else {
+			fmt.Println(T("已悬空: 内核以空配置运行, 全部流量 DIRECT (服务保持运行)"))
+		}
+		if len(s.Profiles) > 0 {
+			fmt.Println(T("提示: 可 mihomo-cli sub use <id|名称> 重新启用"))
+		}
 		return nil
 	},
 }
@@ -227,7 +241,6 @@ func humanTime(t time.Time) string {
 }
 
 func init() {
-	subAddCmd.Flags().StringVarP(&subAddName, "name", "n", "default", T("订阅名称"))
 	subCmd.AddCommand(subAddCmd, subRmCmd, subListCmd, subUpdateCmd, subUseCmd, subUnuseCmd, subRenameCmd)
 	rootCmd.AddCommand(subCmd)
 }

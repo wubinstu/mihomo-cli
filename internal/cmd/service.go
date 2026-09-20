@@ -76,8 +76,11 @@ var statusCmd = &cobra.Command{
 			fmt.Printf("%-12s sub%d:%s (%d %s, %s)\n", T("当前订阅"), subIndex(s, p.Name), p.Name, p.Nodes, T("节点"), p.UpdatedAt.Format("2006-01-02 15:04"))
 		} else {
 			fmt.Printf("%-12s %s\n", T("当前订阅"), T("悬空 (sub unuse)"))
+			if active {
+				fmt.Printf("%-12s %s\n", T("内核流量"), T("DIRECT (空配置)"))
+			}
 		}
-		if s.CurrentGroup != "" && active {
+		if s.Current() != nil && s.CurrentGroup != "" && active {
 			c := api.New(s)
 			if ps, err := c.Proxies(); err == nil {
 				if g := resolveGroupArg(ps, s.CurrentGroup); g != nil {
