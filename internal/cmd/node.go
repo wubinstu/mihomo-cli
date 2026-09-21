@@ -7,11 +7,16 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 
 	"github.com/wubinstu/mihomo-cli/internal/api"
+	"github.com/wubinstu/mihomo-cli/internal/app"
+	"github.com/wubinstu/mihomo-cli/internal/geo"
+	"github.com/wubinstu/mihomo-cli/internal/subs"
 	"github.com/wubinstu/mihomo-cli/internal/ui"
 )
 
@@ -86,23 +91,78 @@ func nodeListRun(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	rows := [][]string{{"*", "#", T("节点"), T("类型")}}
+	// 节点服务器地址 -> 地区 (并发, 结果进 region map)
+	servers := nodeServers(s)
+	regions := make(map[string]string)
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	for _, n := range g.All {
+		if p, ok := ps.Proxies[n]; ok && groupType(p) {
+			continue // 子分组
+		}
+		if isDirectish(n) {
+			continue
+		}
+		wg.Add(1)
+		go func(name string) {
+			defer wg.Done()
+			iso := geo.Region(servers[name])
+			if iso == "" {
+				return
+			}
+			mu.Lock()
+			regions[name] = geo.Name(iso)
+			mu.Unlock()
+		}(n)
+	}
+	wg.Wait()
+
+	rows := [][]string{{"*", "#", T("节点"), T("类型"), T("地区")}}
 	for i, n := range g.All {
 		typ := "node"
 		mark := ""
+		region := "-"
 		if p, ok := ps.Proxies[n]; ok && groupType(p) {
 			typ = p.Type
 		} else if isDirectish(n) {
 			typ = "policy"
+		} else if r, ok := regions[n]; ok {
+			region = r
 		}
 		if n == g.Now {
 			mark = "*"
 		}
-		rows = append(rows, []string{mark, strconv.Itoa(i + 1), n, typ})
+		rows = append(rows, []string{mark, strconv.Itoa(i + 1), n, typ, region})
 	}
 	fmt.Printf("[%s] %d %s\n", g.Name, len(g.All), T("节点"))
 	ui.Table(os.Stdout, rows, 2)
 	return nil
+}
+
+// nodeServers 从订阅文件提取 节点名 -> server 映射
+func nodeServers(s *app.Settings) map[string]string {
+	out := map[string]string{}
+	p := s.Current()
+	if p == nil {
+		return out
+	}
+	data, err := os.ReadFile(subs.Path(p.Name))
+	if err != nil {
+		return out
+	}
+	var cfg struct {
+		Proxies []struct {
+			Name   string `yaml:"name"`
+			Server string `yaml:"server"`
+		} `yaml:"proxies"`
+	}
+	if yaml.Unmarshal(data, &cfg) != nil {
+		return out
+	}
+	for _, px := range cfg.Proxies {
+		out[px.Name] = px.Server
+	}
+	return out
 }
 
 var nodeUseCmd = &cobra.Command{

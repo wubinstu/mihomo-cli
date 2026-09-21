@@ -98,6 +98,19 @@ func Generate(s *app.Settings) error {
 	if s.ProxyMode != "" {
 		cfg["mode"] = s.ProxyMode
 	}
+	// 用户规则优先: 置于订阅规则之前 (mihomo 首条匹配即生效)
+	if len(s.UserRules) > 0 {
+		subRules := []string{}
+		if raw, ok := cfg["rules"].([]any); ok {
+			for _, r := range raw {
+				if rs, ok := r.(string); ok {
+					subRules = append(subRules, rs)
+				}
+			}
+		}
+		merged := append(append([]string{}, s.UserRules...), subRules...)
+		cfg["rules"] = merged
+	}
 	// 自定义 DNS: 覆盖 nameserver/default-nameserver (空则跟随订阅)
 	if len(s.DNSServers) > 0 {
 		dns, _ := cfg["dns"].(map[string]any)

@@ -27,8 +27,29 @@ eval $(mihomo-cli proxy on) ` + T("当前 shell 开启代理"),
 func Execute() {
 	// 所有子命令禁用文件路径补全 (避免补全末端落到文件名)
 	disableFileComp(rootCmd)
+	// cobra 内置命令(help/completion)文案本地化 (需先触发默认命令创建)
+	rootCmd.InitDefaultHelpCmd()
+	rootCmd.InitDefaultCompletionCmd()
+	localizeBuiltins(rootCmd)
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
+	}
+}
+
+func localizeBuiltins(c *cobra.Command) {
+	for _, sub := range c.Commands() {
+		switch sub.Name() {
+		case "help":
+			sub.Short = T("任意命令的帮助信息")
+			sub.Long = T("显示任意命令的帮助信息; 用法: mihomo-cli help [command]")
+		case "completion":
+			sub.Short = T("生成指定 shell 的自动补全脚本")
+			sub.Long = T("为指定的 shell 生成自动补全脚本 (bash/zsh/fish/powershell)。")
+			for _, sh := range sub.Commands() {
+				sh.Short = T("生成") + " " + sh.Name() + " " + T("补全脚本")
+			}
+		}
+		localizeBuiltins(sub)
 	}
 }
 

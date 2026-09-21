@@ -46,6 +46,9 @@ type Settings struct {
 	TestURL     string `toml:"test_url"`
 	TestTimeout int    `toml:"test_timeout_ms"`
 
+	// 用户自定义规则 (独立于订阅, 优先于订阅规则匹配)
+	UserRules []string `toml:"user_rules"`
+
 	Profiles []Profile `toml:"profiles"`
 }
 
