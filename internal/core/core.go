@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"time"
 	"strings"
 
 	"github.com/wubinstu/mihomo-cli/internal/app"
@@ -218,3 +219,79 @@ func Upgrade(proxy string, pre bool) error {
 }
 
 func CoreBinPath() string { return filepath.Clean(app.CoreBin) }
+
+// geo 数据源: 镜像在前 (国内可达), GitHub 官方兜底
+var geoMirrors = map[string][]string{
+	"geoip.metadb": {
+		"https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geoip.metadb",
+		"https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/release/geoip.metadb",
+	},
+	"GeoSite.dat": {
+		"https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geosite.dat",
+		"https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/release/geosite.dat",
+	},
+}
+
+// DownloadGeo 预下载 geo 数据到 runtime 目录, 避免内核启动时直连 GitHub 下载失败导致 fatal 循环
+func DownloadGeo(proxy string) error {
+	for name, urls := range geoMirrors {
+		dst := filepath.Join(app.RuntimeDir, name)
+		if _, err := os.Stat(dst); err == nil {
+			continue
+		}
+		var lastErr error
+		for _, u := range urls {
+			for attempt := 1; attempt <= 3; attempt++ {
+				fmt.Printf("%s %s (%s, %d/3) ...\n", i18n.T("下载"), name, shortURL(u), attempt)
+				if err := downloadPlain(u, proxy, dst+".tmp"); err != nil {
+					lastErr = err
+					fmt.Printf("  %s: %v\n", i18n.T("下载失败"), err)
+					continue
+				}
+				if err := os.Rename(dst+".tmp", dst); err != nil {
+					return err
+				}
+				break
+			}
+			if _, err := os.Stat(dst); err == nil {
+				break
+			}
+		}
+		if _, err := os.Stat(dst); err != nil {
+			return fmt.Errorf("%s: %w", name, lastErr)
+		}
+	}
+	return nil
+}
+
+func downloadPlain(u, proxy, dst string) error {
+	hc := HTTPClient(proxy)
+	hc.Timeout = 10 * time.Minute
+	req, _ := http.NewRequest("GET", u, nil)
+	req.Header.Set("User-Agent", "mihomo-cli")
+	resp, err := hc.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+	f, err := os.OpenFile(dst, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = io.Copy(f, resp.Body)
+	return err
+}
+
+func shortURL(u string) string {
+    if i := strings.Index(u, "//"); i >= 0 {
+        u = u[i+2:]
+    }
+    if len(u) > 40 {
+        u = u[:40] + "..."
+    }
+    return u
+}

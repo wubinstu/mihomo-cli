@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"os/exec"
 	"runtime"
 	"strconv"
@@ -143,6 +144,13 @@ var doctorCmd = &cobra.Command{
 		fmt.Printf("%s %-14s %s\n", ok(s.Current() != nil), T("订阅"), orDash(pinfo, nil))
 		_, err = os.Stat(app.RuntimeConfig)
 		fmt.Printf("%s %-14s %s\n", ok(err == nil), T("运行配置"), app.RuntimeConfig)
+		// geo 数据 (缺失会导致内核启动 fatal 循环)
+		geoOK := false
+		if _, err := os.Stat(app.RuntimeDir + "/geoip.metadb"); err == nil {
+			geoOK = true
+		}
+		fmt.Printf("%s %-14s %s\n", ok(geoOK), "geo " + T("数据"), map[bool]string{
+			true: T("已下载"), false: T("缺失 (mihomo-cli core geo)")}[geoOK])
 		active := sysd.IsActive()
 		svc := T("未运行 (mihomo-cli start)")
 		if active {
@@ -421,9 +429,27 @@ func humanBytes(n int64) string {
 	return fmt.Sprintf("%.1fPiB", f)
 }
 
+var coreGeoCmd = &cobra.Command{
+	Use:   "geo",
+	Short: T("下载/更新 geo 数据 (geoip/geosite, 内核规则依赖)"),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		s := mustSettings()
+		// 强制刷新: 删除已有文件
+		for _, f := range []string{"geoip.metadb", "GeoSite.dat"} {
+			_ = os.Remove(filepath.Join(app.RuntimeDir, f))
+		}
+		if err := core.DownloadGeo(s.DownloadProxy); err != nil {
+			return err
+		}
+		fmt.Println(T("已下载"))
+		reloadIfActive(s)
+		return nil
+	},
+}
+
 func init() {
 	connCmd.Flags().BoolVar(&connWatch, "watch", false, T("持续刷新"))
 	logCmd.Flags().BoolVarP(&logFollow, "follow", "f", false, T("跟随日志"))
-	coreCmd.AddCommand(coreVersionCmd, coreUpgradeCmd, coreRollbackCmd)
+	coreCmd.AddCommand(coreVersionCmd, coreUpgradeCmd, coreRollbackCmd, coreGeoCmd)
 	rootCmd.AddCommand(connCmd, trafficCmd, logCmd, doctorCmd, setCmd, getCmd, coreCmd, versionCmd)
 }

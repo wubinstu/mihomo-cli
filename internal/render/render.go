@@ -71,6 +71,18 @@ func Generate(s *app.Settings) error {
 		}
 	}
 
+	// geo 数据镜像 (内核更新 geodata 时不再直连 GitHub; 用户 overrides 可覆盖)
+	if _, ok := cfg["geox-url"]; !ok {
+		if _, need := cfg["rules"]; need {
+			cfg["geox-url"] = map[string]any{
+				"geoip":   "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geoip.metadb",
+				"geosite": "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geosite.dat",
+				"mmdb":    "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/country.mmdb",
+				"asn":     "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/GeoLite2-ASN.mmdb",
+			}
+		}
+	}
+
 	// cli 运行时注入层(强制)
 	cfg["external-controller"] = "127.0.0.1:9090"
 	cfg["secret"] = s.APISecret

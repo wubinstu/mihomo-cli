@@ -77,13 +77,19 @@ var installCmd = &cobra.Command{
 			return err
 		}
 
-		// 2. systemd 服务
+		// 2. geo 数据预下载 (避免内核首次启动直连 GitHub 下载 MMDB 失败导致 fatal 循环)
+		fmt.Println(T("预下载 geo 数据 (geoip/geosite) ..."))
+		if err := core.DownloadGeo(s.DownloadProxy); err != nil {
+			fmt.Fprintf(os.Stderr, "%s: %v\n", T("警告: geo 数据下载失败"), err)
+		}
+
+		// 3. systemd 服务
 		fmt.Println(T("注册 systemd 服务 ..."))
 		if err := sysd.InstallService(); err != nil {
 			return err
 		}
 
-		// 3. 订阅
+		// 4. 订阅
 		if installSub != "" {
 			if err := subs.Add(s, "default", installSub); err != nil {
 				return fmt.Errorf("%s: %w", T("添加订阅失败"), err)
