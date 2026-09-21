@@ -112,6 +112,8 @@ type ConnInfo struct {
 		SourceIP    string `json:"sourceIP"`
 		Destination string `json:"destinationIP"`
 		Host        string `json:"host"`
+		Process     string `json:"process"`
+		ProcessPath string `json:"processPath"`
 	} `json:"metadata"`
 	Upload   int64  `json:"upload"`
 	Download int64  `json:"download"`

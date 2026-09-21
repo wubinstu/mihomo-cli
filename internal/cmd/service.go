@@ -57,40 +57,40 @@ var statusCmd = &cobra.Command{
 		if active {
 			state = T("运行中")
 		}
-		fmt.Printf("%-12s %s\n", T("服务状态"), state)
+		fmt.Printf("%-16s %s\n", T("服务状态"), state)
 		if active {
 			c := api.New(s)
 			if v, err := c.Version(); err == nil {
-				fmt.Printf("%-12s %s\n", T("内核版本"), v)
+				fmt.Printf("%-16s %s\n", T("内核版本"), v)
 			}
 			if m, err := c.ConfigMode(); err == nil {
-				fmt.Printf("%-12s %s\n", T("代理模式"), m)
+				fmt.Printf("%-16s %s\n", T("代理模式"), m)
 			}
 		}
-		fmt.Printf("%-12s %d (http+socks5)\n", T("混合端口"), s.MixedPort)
+		fmt.Printf("%-16s %d (http+socks5)\n", T("混合端口"), s.MixedPort)
 		lan := T("仅本机 (127.0.0.1)")
 		if s.AllowLan {
 			lan = T("允许 (0.0.0.0)")
 		}
-		fmt.Printf("%-12s %s\n", T("局域网"), lan)
+		fmt.Printf("%-16s %s\n", T("局域网"), lan)
 		if len(s.DNSServers) == 0 {
-			fmt.Printf("%-12s %s\n", T("当前DNS"), T("跟随订阅"))
+			fmt.Printf("%-16s %s\n", T("当前DNS"), T("跟随订阅"))
 		} else {
-			fmt.Printf("%-12s %s\n", T("当前DNS"), strings.Join(s.DNSServers, ", "))
+			fmt.Printf("%-16s %s\n", T("当前DNS"), strings.Join(s.DNSServers, ", "))
 		}
 		if active {
 			if r, err := api.New(s).Connections(); err == nil {
-				fmt.Printf("%-12s ↑ %s  ↓ %s  (%d %s)\n", T("流量统计"),
+				fmt.Printf("%-16s ↑ %s  ↓ %s  (%d %s)\n", T("流量统计"),
 					humanBytes(r.UploadTotal), humanBytes(r.DownloadTotal),
 					len(r.Connections), T("活动连接"))
 			}
 		}
 		if p := s.Current(); p != nil {
-			fmt.Printf("%-12s sub%d:%s (%d %s, %s)\n", T("当前订阅"), subIndex(s, p.Name), p.Name, p.Nodes, T("节点"), p.UpdatedAt.Format("2006-01-02 15:04"))
+			fmt.Printf("%-16s sub%d:%s (%d %s, %s)\n", T("当前订阅"), subIndex(s, p.Name), p.Name, p.Nodes, T("节点"), p.UpdatedAt.Format("2006-01-02 15:04"))
 		} else {
-			fmt.Printf("%-12s %s\n", T("当前订阅"), T("悬空 (sub unuse)"))
+			fmt.Printf("%-16s %s\n", T("当前订阅"), T("悬空 (sub unuse)"))
 			if active {
-				fmt.Printf("%-12s %s\n", T("内核流量"), T("DIRECT (空配置)"))
+				fmt.Printf("%-16s %s\n", T("内核流量"), T("DIRECT (空配置)"))
 			}
 		}
 		if s.Current() != nil && s.CurrentGroup != "" && active {
@@ -104,9 +104,9 @@ var statusCmd = &cobra.Command{
 						if d > 0 {
 							dTxt = fmt.Sprintf("%d ms", d)
 						}
-						fmt.Printf("%-12s %s:%s → %s:%s (%s)\n", T("当前链路"), gid, g.Name, nodeID(g, g.Now), g.Now, dTxt)
+						fmt.Printf("%-16s %s:%s → %s:%s (%s)\n", T("当前链路"), gid, g.Name, nodeID(g, g.Now), g.Now, dTxt)
 					} else {
-						fmt.Printf("%-12s %s:%s\n", T("当前链路"), gid, g.Name)
+						fmt.Printf("%-16s %s:%s\n", T("当前链路"), gid, g.Name)
 					}
 				}
 			}
@@ -119,27 +119,32 @@ var statusCmd = &cobra.Command{
 // printTimers 打印自动任务状态: sub 悬空时均显示悬空; group 悬空时择优显示悬空
 func printTimers(s *app.Settings) {
 	if s.Current() == nil {
-		fmt.Printf("%-12s %s\n", T("订阅自动更新"), T("悬空 (sub unuse)"))
-		fmt.Printf("%-12s %s\n", T("节点自动择优"), T("悬空 (sub unuse)"))
+		fmt.Printf("%-16s %s\n", T("订阅自动更新"), T("悬空 (sub unuse)"))
+		fmt.Printf("%-16s %s\n", T("节点自动择优"), T("悬空 (sub unuse)"))
 		return
 	}
 	last := humanTime(s.Current().UpdatedAt)
-	next := remaining(s.Current().UpdatedAt, s.SubAutoUpdateInterval)
-	fmt.Printf("%-12s %s | %s %s | %s %s\n", T("订阅自动更新"),
-		onOff2(s.SubAutoUpdateEnabled), T("上次"), last, T("下次"), next)
+	if s.SubAutoUpdateEnabled {
+		next := remaining(s.Current().UpdatedAt, s.SubAutoUpdateInterval)
+		fmt.Printf("%-16s %s | %s %s | %s %s\n", T("订阅自动更新"),
+			onOff2(s.SubAutoUpdateEnabled), T("上次"), last, T("下次"), next)
+	} else {
+		fmt.Printf("%-16s %s | %s %s\n", T("订阅自动更新"),
+			onOff2(s.SubAutoUpdateEnabled), T("上次"), last)
+	}
 
 	if s.CurrentGroup == "" {
-		fmt.Printf("%-12s %s\n", T("节点自动择优"), T("悬空 (group 未选)"))
+		fmt.Printf("%-16s %s\n", T("节点自动择优"), T("悬空 (group 未选)"))
 		return
 	}
-	next2 := remaining(s.AutoSelectLastRun, s.ProxyAutoSelectInterval)
+	next2 := remaining(s.AutoSelectLastRun, s.NodeAutoSelectInterval)
 	last2 := humanTime(s.AutoSelectLastRun)
-	if s.ProxyAutoSelectEnabled {
-		fmt.Printf("%-12s %s | %s %s | %s %s\n", T("节点自动择优"),
-			onOff2(s.ProxyAutoSelectEnabled), T("上次"), last2, T("下次"), next2)
+	if s.NodeAutoSelectEnabled {
+		fmt.Printf("%-16s %s | %s %s | %s %s\n", T("节点自动择优"),
+			onOff2(s.NodeAutoSelectEnabled), T("上次"), last2, T("下次"), next2)
 	} else {
-		fmt.Printf("%-12s %s | %s %s\n", T("节点自动择优"),
-			onOff2(s.ProxyAutoSelectEnabled), T("上次"), last2)
+		fmt.Printf("%-16s %s | %s %s\n", T("节点自动择优"),
+			onOff2(s.NodeAutoSelectEnabled), T("上次"), last2)
 	}
 }
 

@@ -128,7 +128,7 @@ Unit=mihomo-cli-auto.service
 
 [Install]
 WantedBy=timers.target
-`, systemdDur(s.ProxyAutoSelectInterval))
+`, systemdDur(s.NodeAutoSelectInterval))
 
 	if err := writeUnit("mihomo-cli-sub.service", subUnit); err != nil {
 		return err
@@ -154,7 +154,7 @@ WantedBy=timers.target
 	if err != nil {
 		return err
 	}
-	if s.ProxyAutoSelectEnabled {
+	if s.NodeAutoSelectEnabled {
 		_, err = runRoot("systemctl", "enable", "--now", "mihomo-cli-auto.timer")
 	} else {
 		_, _ = runRoot("systemctl", "disable", "--now", "mihomo-cli-auto.timer")

@@ -1,8 +1,6 @@
 package cmd
 
 import (
-	"bufio"
-	"encoding/json"
 	"fmt"
 	"net"
 	"os"
@@ -23,170 +21,6 @@ import (
 	"github.com/wubinstu/mihomo-cli/internal/sysd"
 	"github.com/wubinstu/mihomo-cli/internal/ui"
 )
-
-// ---- conn ----
-
-var connWatch bool
-
-var connCmd = &cobra.Command{
-	Use:   "conn",
-	Short: T("查看活动连接 (编号可 kill; --watch 持续刷新)"),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		s := mustSettings()
-		for {
-			if err := printConns(api.New(s)); err != nil {
-				return err
-			}
-			if !connWatch {
-				return nil
-			}
-			time.Sleep(2 * time.Second)
-			fmt.Print("\033[H\033[2J")
-		}
-	},
-}
-
-// connSeqStore 连接编号持久化 (PID 风格: 递增分配, 断开的编号保留一段时间后回收)
-type connSeqStore struct {
-	Seq  int              `json:"seq"`
-	Maps map[string]int   `json:"maps"` // conn uuid -> 编号
-	Seen map[string]int64 `json:"seen"` // conn uuid -> 最后见到的时间戳
-}
-
-func loadConnSeq() *connSeqStore {
-	st := &connSeqStore{Maps: map[string]int{}, Seen: map[string]int64{}}
-	if data, err := os.ReadFile(app.RuntimeDir + "/connseq.json"); err == nil {
-		_ = json.Unmarshal(data, st)
-	}
-	if st.Maps == nil {
-		st.Maps = map[string]int{}
-	}
-	if st.Seen == nil {
-		st.Seen = map[string]int64{}
-	}
-	return st
-}
-
-func (st *connSeqStore) save() {
-	data, _ := json.Marshal(st)
-	_ = os.WriteFile(app.RuntimeDir+"/connseq.json", data, 0o644)
-}
-
-// assign 为当前连接集合分配编号: 新连接取新号; 10 分钟未见到的旧编号回收
-func (st *connSeqStore) assign(conns []api.ConnInfo) map[string]int {
-	now := time.Now().Unix()
-	for _, cn := range conns {
-		if _, ok := st.Maps[cn.ID]; !ok {
-			st.Seq++
-			st.Maps[cn.ID] = st.Seq
-		}
-		st.Seen[cn.ID] = now
-	}
-	for id, ts := range st.Seen {
-		if now-ts > 600 {
-			delete(st.Maps, id)
-			delete(st.Seen, id)
-		}
-	}
-	st.save()
-	return st.Maps
-}
-
-func printConns(c *api.Client) error {
-	r, err := c.Connections()
-	if err != nil {
-		return err
-	}
-	fmt.Printf("%s: %d  %s ↑%s ↓%s\n", T("活动连接"), len(r.Connections), T("累计"),
-		humanBytes(r.UploadTotal), humanBytes(r.DownloadTotal))
-	if len(r.Connections) == 0 {
-		return nil
-	}
-	st := loadConnSeq().assign(r.Connections)
-	rows := [][]string{{"#", T("网络"), T("目标"), T("代理链"), "↑", "↓"}}
-	for _, cn := range r.Connections {
-		host := cn.Metadata.Host
-		if host == "" {
-			host = cn.Metadata.Destination
-		}
-		rows = append(rows, []string{
-			strconv.Itoa(st[cn.ID]), cn.Metadata.Network, host,
-			strings.Join(cn.Chains, "/"),
-			humanBytes(cn.Upload), humanBytes(cn.Download),
-		})
-	}
-	ui.Table(os.Stdout, rows, 2)
-	return nil
-}
-
-var connKillCmd = &cobra.Command{
-	Use:   "kill <编号|编号..>",
-	Short: T("关闭指定编号的活动连接"),
-	Args:  cobra.MinimumNArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		s := mustSettings()
-		c := api.New(s)
-		r, err := c.Connections()
-		if err != nil {
-			return err
-		}
-		st := loadConnSeq().assign(r.Connections)
-		bySeq := map[int]string{}
-		for id, n := range st {
-			bySeq[n] = id
-		}
-		killed := 0
-		for _, a := range args {
-			n, err := strconv.Atoi(a)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "%s: %q\n", T("无效编号"), a)
-				continue
-			}
-			id, ok := bySeq[n]
-			if !ok {
-				fmt.Fprintf(os.Stderr, "#%d: %s\n", n, T("连接不存在或已关闭"))
-				continue
-			}
-			if err := c.CloseConn(id); err != nil {
-				fmt.Fprintf(os.Stderr, "#%d: %v\n", n, err)
-				continue
-			}
-			fmt.Printf("#%d %s\n", n, T("已关闭"))
-			killed++
-		}
-		if killed == 0 {
-			return fmt.Errorf("%s", T("没有连接被关闭"))
-		}
-		return nil
-	},
-}
-
-// ---- traffic ----
-
-var trafficCmd = &cobra.Command{
-	Use:   "traffic",
-	Short: T("实时上下行流量 (Ctrl-C 退出)"),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		s := mustSettings()
-		resp, err := api.New(s).Stream("/traffic")
-		if err != nil {
-			return err
-		}
-		defer resp.Body.Close()
-		fmt.Println(T("实时流量 (每秒):"))
-		sc := bufio.NewScanner(resp.Body)
-		for sc.Scan() {
-			var t struct {
-				Up   int64 `json:"up"`
-				Down int64 `json:"down"`
-			}
-			if json.Unmarshal(sc.Bytes(), &t) == nil {
-				fmt.Printf("\r↑ %8s/s   ↓ %8s/s   ", humanBytes(t.Up), humanBytes(t.Down))
-			}
-		}
-		return nil
-	},
-}
 
 // ---- log ----
 
@@ -223,48 +57,48 @@ var doctorCmd = &cobra.Command{
 			return "✘"
 		}
 		err := app.EnsureDirs()
-		fmt.Printf("%s %-14s %s\n", ok(err == nil), T("数据目录"), app.BaseDir)
+		fmt.Printf("%s %-16s %s\n", ok(err == nil), T("数据目录"), app.BaseDir)
 		v, err := core.Version()
-		fmt.Printf("%s %-14s %s\n", ok(err == nil), T("内核"), orDash(v, err))
+		fmt.Printf("%s %-16s %s\n", ok(err == nil), T("内核"), orDash(v, err))
 		var pinfo string
 		if p := s.Current(); p != nil {
 			pinfo = fmt.Sprintf("%s (%d %s, %s)", p.Name, p.Nodes, T("节点"), humanTime(p.UpdatedAt))
 		}
-		fmt.Printf("%s %-14s %s\n", ok(s.Current() != nil), T("订阅"), orDash(pinfo, nil))
+		fmt.Printf("%s %-16s %s\n", ok(s.Current() != nil), T("订阅"), orDash(pinfo, nil))
 		_, err = os.Stat(app.RuntimeConfig)
-		fmt.Printf("%s %-14s %s\n", ok(err == nil), T("运行配置"), app.RuntimeConfig)
+		fmt.Printf("%s %-16s %s\n", ok(err == nil), T("运行配置"), app.RuntimeConfig)
 		// geo 数据 (缺失会导致内核启动 fatal 循环)
 		geoOK := false
 		if _, err := os.Stat(app.RuntimeDir + "/geoip.metadb"); err == nil {
 			geoOK = true
 		}
-		fmt.Printf("%s %-14s %s\n", ok(geoOK), "geo " + T("数据"), map[bool]string{
+		fmt.Printf("%s %-16s %s\n", ok(geoOK), "geo " + T("数据"), map[bool]string{
 			true: T("已下载"), false: T("缺失 (mihomo-cli core geo)")}[geoOK])
 		active := sysd.IsActive()
 		svc := T("未运行 (mihomo-cli start)")
 		if active {
 			svc = T("运行中")
 		}
-		fmt.Printf("%s %-14s %s\n", ok(active), T("服务"), svc)
+		fmt.Printf("%s %-16s %s\n", ok(active), T("服务"), svc)
 		var apiInfo string
 		ver, err := api.New(s).Version()
 		if err == nil {
 			apiInfo = T("API 正常, 内核") + " " + ver
 		}
-		fmt.Printf("%s %-14s %s\n", ok(err == nil), T("控制API"), orDash(apiInfo, err))
+		fmt.Printf("%s %-16s %s\n", ok(err == nil), T("控制API"), orDash(apiInfo, err))
 		live := portOpen(fmt.Sprintf("127.0.0.1:%d", s.MixedPort))
-		fmt.Printf("%s %-14s 127.0.0.1:%d %s\n", ok(live), T("代理端口"), s.MixedPort, listenWord(live))
+		fmt.Printf("%s %-16s 127.0.0.1:%d %s\n", ok(live), T("代理端口"), s.MixedPort, listenWord(live))
 		if s.AllowLan {
 			live2 := portOpen(fmt.Sprintf("0.0.0.0:%d", s.MixedPort))
-			fmt.Printf("%s %-14s 0.0.0.0:%d %s (LAN: http://%s:%d)\n",
+			fmt.Printf("%s %-16s 0.0.0.0:%d %s (LAN: http://%s:%d)\n",
 				ok(live2), T("局域网"), s.MixedPort, listenWord(live2), lanIP(), s.MixedPort)
 		}
 		subOn := sysd.TimerEnabled("mihomo-cli-sub.timer")
-		fmt.Printf("%s %-14s %s (%s %s)\n", ok(subOn == s.SubAutoUpdateEnabled),
+		fmt.Printf("%s %-16s %s (%s %s)\n", ok(subOn == s.SubAutoUpdateEnabled),
 			T("订阅自动更新"), onOff(subOn), T("周期"), s.SubAutoUpdateInterval)
 		autoOn := sysd.TimerEnabled("mihomo-cli-auto.timer")
-		fmt.Printf("%s %-14s %s (%s %s)\n", ok(autoOn == s.ProxyAutoSelectEnabled),
-			T("自动择优节点"), onOff(autoOn), T("周期"), s.ProxyAutoSelectInterval)
+		fmt.Printf("%s %-16s %s (%s %s)\n", ok(autoOn == s.NodeAutoSelectEnabled),
+			T("节点自动择优"), onOff(autoOn), T("周期"), s.NodeAutoSelectInterval)
 		fmt.Println(T("提示: 使用 curl -I https://www.google.com 验证代理是否生效 (先 eval $(mihomo-cli proxy on))"))
 		return nil
 	},
@@ -314,8 +148,8 @@ mixed-port <port>                ` + T("混合代理端口 (默认 7890)") + `
 proxy-mode <rule|global|direct>  ` + T("代理模式 (热切换)") + `
 sub-auto-update-enabled <bool>   ` + T("订阅自动更新开关") + `
 sub-auto-update-interval <dur>   ` + T("订阅自动更新周期") + `, 如 12h / 30m
-proxy-auto-select-enabled <bool>   ` + T("自动切换到最低延迟节点") + ` (作用于当前分组)
-proxy-auto-select-interval <dur>   ` + T("自动择优周期") + `, 如 15m
+node-auto-select-enabled <bool>   ` + T("自动切换到最低延迟节点") + ` (作用于当前分组)
+node-auto-select-interval <dur>   ` + T("自动择优周期") + `, 如 15m
 test-url <url>                   ` + T("测速 URL") + `
 test-timeout <ms>                ` + T("测速超时(毫秒)"),
 	Args: cobra.RangeArgs(0, 2),
@@ -360,14 +194,14 @@ test-timeout <ms>                ` + T("测速超时(毫秒)"),
 				return fmt.Errorf("%s", T("无效周期 (>=1m), 如 12h"))
 			}
 			s.SubAutoUpdateInterval = d
-		case "proxy-auto-select-enabled":
-			s.ProxyAutoSelectEnabled = b()
-		case "proxy-auto-select-interval":
+		case "node-auto-select-enabled":
+			s.NodeAutoSelectEnabled = b()
+		case "node-auto-select-interval":
 			d, err := time.ParseDuration(v)
 			if err != nil || d < time.Minute {
 				return fmt.Errorf("%s", T("无效周期 (>=1m), 如 15m"))
 			}
-			s.ProxyAutoSelectInterval = d
+			s.NodeAutoSelectInterval = d
 		case "test-url":
 			s.TestURL = v
 		case "test-timeout":
@@ -424,8 +258,8 @@ var getCmd = &cobra.Command{
 			{"proxy-mode", mode},
 			{"sub-auto-update-enabled", fmt.Sprintf("%v", s.SubAutoUpdateEnabled)},
 			{"sub-auto-update-interval", s.SubAutoUpdateInterval.String()},
-			{"proxy-auto-select-enabled", fmt.Sprintf("%v", s.ProxyAutoSelectEnabled)},
-			{"proxy-auto-select-interval", s.ProxyAutoSelectInterval.String()},
+			{"node-auto-select-enabled", fmt.Sprintf("%v", s.NodeAutoSelectEnabled)},
+			{"node-auto-select-interval", s.NodeAutoSelectInterval.String()},
 			{"test-url", s.TestURL},
 			{"test-timeout", fmt.Sprintf("%dms", s.TestTimeout)},
 			{"current-profile", s.CurrentProfile},
@@ -457,8 +291,8 @@ var setKeyDocs = map[string][2]string{
 	"proxy-mode":                  {T("代理模式"), "rule(" + T("规则分流") + ") | global(" + T("全部走当前选中节点") + ") | direct(" + T("全部直连") + ")"},
 	"sub-auto-update-enabled":     {T("订阅定时自动更新"), "true | false"},
 	"sub-auto-update-interval":    {T("订阅自动更新周期"), "1m-720h; " + T("如 12h / 30m")},
-	"proxy-auto-select-enabled":   {T("定时对当前分组自动择优"), "true | false; " + T("作用于当前 group use 的分组")},
-	"proxy-auto-select-interval":  {T("自动择优周期"), "1m-720h; " + T("如 15m")},
+	"node-auto-select-enabled":   {T("定时对当前分组自动择优"), "true | false; " + T("作用于当前 group use 的分组")},
+	"node-auto-select-interval":  {T("自动择优周期"), "1m-720h; " + T("如 15m")},
 	"test-url":                    {T("测速 URL"), "http(s)://...; " + T("建议 204 端点")},
 	"test-timeout":                {T("测速超时(毫秒)"), "100-60000"},
 }
@@ -489,10 +323,10 @@ func setKeyHelp(k string) error {
 			return fmt.Sprintf("%v", s.SubAutoUpdateEnabled)
 		case "sub-auto-update-interval":
 			return s.SubAutoUpdateInterval.String()
-		case "proxy-auto-select-enabled":
-			return fmt.Sprintf("%v", s.ProxyAutoSelectEnabled)
-		case "proxy-auto-select-interval":
-			return s.ProxyAutoSelectInterval.String()
+		case "node-auto-select-enabled":
+			return fmt.Sprintf("%v", s.NodeAutoSelectEnabled)
+		case "node-auto-select-interval":
+			return s.NodeAutoSelectInterval.String()
 		case "test-url":
 			return s.TestURL
 		case "test-timeout":
@@ -510,7 +344,7 @@ func settingKeys() []string {
 	return []string{
 		"lang", "allow-lan", "mixed-port", "proxy-mode",
 		"sub-auto-update-enabled", "sub-auto-update-interval",
-		"proxy-auto-select-enabled", "proxy-auto-select-interval",
+		"node-auto-select-enabled", "node-auto-select-interval",
 		"test-url", "test-timeout",
 	}
 }
@@ -519,7 +353,7 @@ func setValueCandidates(k string) []string {
 	switch k {
 	case "lang":
 		return []string{"zh", "en"}
-	case "allow-lan", "sub-auto-update-enabled", "proxy-auto-select-enabled":
+	case "allow-lan", "sub-auto-update-enabled", "node-auto-select-enabled":
 		return []string{"true", "false"}
 	case "proxy-mode":
 		return []string{"rule", "global", "direct"}
@@ -593,7 +427,7 @@ var coreRollbackCmd = &cobra.Command{
 
 // ---- version ----
 
-var Version = "0.7.0"
+var Version = "0.8.0"
 
 var versionCmd = &cobra.Command{
 	Use: "version",
@@ -635,7 +469,6 @@ var coreGeoCmd = &cobra.Command{
 }
 
 func init() {
-	connCmd.Flags().BoolVar(&connWatch, "watch", false, T("持续刷新"))
 	logCmd.Flags().BoolVarP(&logFollow, "follow", "f", false, T("跟随日志"))
 	setCmd.ValidArgsFunction = setValidArgs
 	getCmd.ValidArgsFunction = func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
@@ -651,6 +484,5 @@ func init() {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
 	coreCmd.AddCommand(coreVersionCmd, coreUpgradeCmd, coreRollbackCmd, coreGeoCmd)
-	connCmd.AddCommand(connKillCmd)
-	rootCmd.AddCommand(connCmd, trafficCmd, logCmd, doctorCmd, setCmd, getCmd, coreCmd, versionCmd)
+	rootCmd.AddCommand(logCmd, doctorCmd, setCmd, getCmd, coreCmd, versionCmd)
 }

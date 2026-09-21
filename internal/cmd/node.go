@@ -131,7 +131,7 @@ var nodeUseCmd = &cobra.Command{
 			return err
 		}
 		fmt.Printf(T("[%s] %s -> %s")+"\n", g.Name, g.Now, node)
-		if s.ProxyAutoSelectEnabled {
+		if s.NodeAutoSelectEnabled {
 			fmt.Fprintf(os.Stderr, "\x1b[33m%s\x1b[0m\n",
 				T("注意: 自动择优已开启, 下次定时任务可能覆盖此设置"))
 		}
@@ -209,7 +209,7 @@ var nodeAutoCmd = &cobra.Command{
 	Use:   "auto",
 	Short: T("对当前分组测速并切换到延迟最低的节点"),
 	Long: `仅在当前 use 的分组 (sub->group 链路) 内, 于真实节点(排除子分组/DIRECT/REJECT)中
-选择延迟最低者切换。定时任务 (proxy-auto-select-enabled) 周期性执行本命令。
+选择延迟最低者切换。定时任务 (node-auto-select-enabled) 周期性执行本命令。
 未设置当前分组时跳过 (group use <id|名称>)。`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		s := mustSettings()

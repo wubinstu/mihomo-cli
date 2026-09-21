@@ -39,8 +39,8 @@ type Settings struct {
 	SubAutoUpdateInterval time.Duration `toml:"sub_auto_update_interval"`
 
 	// 自动测速并切换到最低延迟节点 (作用于当前 use 的分组)
-	ProxyAutoSelectEnabled  bool          `toml:"proxy_auto_select_enabled"`
-	ProxyAutoSelectInterval time.Duration `toml:"proxy_auto_select_interval"`
+	NodeAutoSelectEnabled  bool          `toml:"node_auto_select_enabled"`
+	NodeAutoSelectInterval time.Duration `toml:"node_auto_select_interval"`
 	AutoSelectLastRun       time.Time     `toml:"auto_select_last_run,omitempty"`
 
 	TestURL     string `toml:"test_url"`
@@ -55,8 +55,8 @@ func DefaultSettings() *Settings {
 		APIBase:                 "http://127.0.0.1:9090",
 		SubAutoUpdateEnabled:    true,
 		SubAutoUpdateInterval:   24 * time.Hour,
-		ProxyAutoSelectEnabled:  false,
-		ProxyAutoSelectInterval: 30 * time.Minute,
+		NodeAutoSelectEnabled:  false,
+		NodeAutoSelectInterval: 30 * time.Minute,
 		TestURL:                 "https://www.gstatic.com/generate_204",
 		TestTimeout:             5000,
 	}
@@ -88,8 +88,8 @@ func LoadSettings() (*Settings, error) {
 	if s.SubAutoUpdateInterval <= 0 {
 		s.SubAutoUpdateInterval = 24 * time.Hour
 	}
-	if s.ProxyAutoSelectInterval <= 0 {
-		s.ProxyAutoSelectInterval = 30 * time.Minute
+	if s.NodeAutoSelectInterval <= 0 {
+		s.NodeAutoSelectInterval = 30 * time.Minute
 	}
 	if s.TestURL == "" {
 		s.TestURL = "https://www.gstatic.com/generate_204"
