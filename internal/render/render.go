@@ -98,6 +98,17 @@ func Generate(s *app.Settings) error {
 	if s.ProxyMode != "" {
 		cfg["mode"] = s.ProxyMode
 	}
+	// 自定义 DNS: 覆盖 nameserver/default-nameserver (空则跟随订阅)
+	if len(s.DNSServers) > 0 {
+		dns, _ := cfg["dns"].(map[string]any)
+		if dns == nil {
+			dns = map[string]any{}
+		}
+		dns["enable"] = true
+		dns["nameserver"] = s.DNSServers
+		dns["default-nameserver"] = s.DNSServers
+		cfg["dns"] = dns
+	}
 
 	out, err := yaml.Marshal(cfg)
 	if err != nil {

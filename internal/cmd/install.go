@@ -49,9 +49,6 @@ var installCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		if installProxy != "" {
-			s.DownloadProxy = installProxy
-		}
 		if installAllowLan {
 			s.AllowLan = true
 		}
@@ -61,12 +58,12 @@ var installCmd = &cobra.Command{
 
 		// 1. 内核
 		if _, err := os.Stat(app.CoreBin); os.IsNotExist(err) {
-			rel, err := core.Latest(s.DownloadProxy)
+			rel, err := core.Latest(installProxy)
 			if err != nil {
 				return err
 			}
 			fmt.Printf("%s: %s (arch=%s)\n", T("最新内核版本"), rel.TagName, core.ArchName())
-			if err := core.DownloadInstall(rel.TagName, s.DownloadProxy, installCompatible); err != nil {
+			if err := core.DownloadInstall(rel.TagName, installProxy, installCompatible); err != nil {
 				return err
 			}
 		} else {
@@ -79,7 +76,7 @@ var installCmd = &cobra.Command{
 
 		// 2. geo 数据预下载 (避免内核首次启动直连 GitHub 下载 MMDB 失败导致 fatal 循环)
 		fmt.Println(T("预下载 geo 数据 (geoip/geosite) ..."))
-		if err := core.DownloadGeo(s.DownloadProxy); err != nil {
+		if err := core.DownloadGeo(installProxy); err != nil {
 			fmt.Fprintf(os.Stderr, "%s: %v\n", T("警告: geo 数据下载失败"), err)
 		}
 
@@ -91,7 +88,7 @@ var installCmd = &cobra.Command{
 
 		// 4. 订阅
 		if installSub != "" {
-			if err := subs.Add(s, "default", installSub); err != nil {
+			if err := subs.Add(s, "default", installSub, installProxy); err != nil {
 				return fmt.Errorf("%s: %w", T("添加订阅失败"), err)
 			}
 		}
@@ -165,7 +162,7 @@ var initCmd = &cobra.Command{
 		if rawurl == "" || !strings.Contains(rawurl, "://") {
 			return fmt.Errorf("%s", T("无效的订阅链接"))
 		}
-		if err := subs.Add(s, "default", rawurl); err != nil {
+		if err := subs.Add(s, "default", rawurl, ""); err != nil {
 			return err
 		}
 		if err := render.Generate(s); err != nil {

@@ -60,14 +60,18 @@ mihomo-cli node test                    节点测速 (彩色: 绿<200 蓝<500 �
 mihomo-cli node auto                    对当前分组择优一次 (定时任务复用)
 
 mihomo-cli proxy on/off                 开/关当前 shell 代理(配合 alias)
-mihomo-cli conn [--watch]               活动连接
+mihomo-cli conn [kill <编号>]           活动连接 (PID 式编号, conn kill 关闭)
+mihomo-cli dns [use|unuse]              DNS 查看/预设(ali/114/google/cloudflare/adguard/quad9/dnspod)/自定义 IP
 mihomo-cli traffic                      实时流量
 mihomo-cli log [-f]                     内核日志
-mihomo-cli core upgrade|rollback        内核升级/回滚
+mihomo-cli core upgrade|rollback|geo    内核升级/回滚/geo 数据
 mihomo-cli doctor                       体检
-mihomo-cli get/set [key]                查看/修改设置
+mihomo-cli get/set [key]                查看/修改设置 (set <key> 单独执行显示该参数说明)
 mihomo-cli uninstall [--purge]          卸载
 ```
+
+下载代理不再持久化: `install --proxy` / `core upgrade --proxy` / `core geo --proxy` / `update --proxy` 临时使用,
+或直接走 `https_proxy` 环境变量。
 
 sub/group/node 三层列表均以第一列 `*` 标记当前 use 选中项。
 
@@ -94,7 +98,6 @@ bash/zsh/fish 补全脚本随 `install` 自动安装、随 `uninstall` 清理。
 | `proxy-auto-select-enabled` | 定时对当前分组自动择优 | `false` |
 | `proxy-auto-select-interval` | 自动择优周期 (如 `15m`) | `30m` |
 | `test-url` / `test-timeout` | 测速 URL / 超时 ms | gstatic 204 / 5000 |
-| `download-proxy` | 下载内核/订阅使用的代理 | 直连 |
 
 自动择优 (`proxy-auto-select-*`) 只作用于当前 `group use` 的分组; 手动 `node use` 时若自动择优开启会有黄色提示。
 自动任务通过 systemd timer (`mihomo-cli-sub.timer` / `mihomo-cli-auto.timer`) 实现, `set` 修改后立即生效。

@@ -23,12 +23,12 @@ type Settings struct {
 	Lang           string `toml:"lang"` // "zh" | "en"; 空则按 $LANG 自动判断
 	CurrentProfile string `toml:"current_profile"`
 	CurrentGroup   string `toml:"current_group"` // group/node 命令的当前操作分组
-	DownloadProxy  string `toml:"download_proxy"`
 
 	// 代理监听与模式
-	AllowLan  bool   `toml:"allow_lan"`  // 监听 0.0.0.0, 局域网可用
-	MixedPort int    `toml:"mixed_port"` // http+socks5 混合端口
-	ProxyMode string `toml:"proxy_mode"` // rule / global / direct; 空则跟随订阅
+	AllowLan   bool   `toml:"allow_lan"`  // 监听 0.0.0.0, 局域网可用
+	MixedPort  int    `toml:"mixed_port"` // http+socks5 混合端口
+	ProxyMode  string `toml:"proxy_mode"` // rule / global / direct; 空则跟随订阅
+	DNSServers []string `toml:"dns_servers"` // 自定义 DNS; 空则跟随订阅
 
 	// 外部控制 API
 	APIBase   string `toml:"api_base"`

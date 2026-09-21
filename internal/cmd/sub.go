@@ -47,7 +47,7 @@ var subAddCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		s := mustSettings()
-		if err := subs.Add(s, args[0], args[1]); err != nil {
+		if err := subs.Add(s, args[0], args[1], ""); err != nil {
 			return err
 		}
 		fmt.Printf("%s [%s] %s\n", T("订阅"), subs.Sanitize(args[0]), T("已添加并生效"))
@@ -115,7 +115,7 @@ var subUpdateCmd = &cobra.Command{
 				name = n
 			}
 		}
-		if err := subs.Update(s, name); err != nil {
+		if err := subs.Update(s, name, ""); err != nil {
 			return err
 		}
 		if err := render.Generate(s); err != nil {

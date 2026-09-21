@@ -30,7 +30,7 @@ var connWatch bool
 
 var connCmd = &cobra.Command{
 	Use:   "conn",
-	Short: T("查看活动连接 (--watch 持续刷新)"),
+	Short: T("查看活动连接 (编号可 kill; --watch 持续刷新)"),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		s := mustSettings()
 		for {
@@ -46,6 +46,52 @@ var connCmd = &cobra.Command{
 	},
 }
 
+// connSeqStore 连接编号持久化 (PID 风格: 递增分配, 断开的编号保留一段时间后回收)
+type connSeqStore struct {
+	Seq  int              `json:"seq"`
+	Maps map[string]int   `json:"maps"` // conn uuid -> 编号
+	Seen map[string]int64 `json:"seen"` // conn uuid -> 最后见到的时间戳
+}
+
+func loadConnSeq() *connSeqStore {
+	st := &connSeqStore{Maps: map[string]int{}, Seen: map[string]int64{}}
+	if data, err := os.ReadFile(app.RuntimeDir + "/connseq.json"); err == nil {
+		_ = json.Unmarshal(data, st)
+	}
+	if st.Maps == nil {
+		st.Maps = map[string]int{}
+	}
+	if st.Seen == nil {
+		st.Seen = map[string]int64{}
+	}
+	return st
+}
+
+func (st *connSeqStore) save() {
+	data, _ := json.Marshal(st)
+	_ = os.WriteFile(app.RuntimeDir+"/connseq.json", data, 0o644)
+}
+
+// assign 为当前连接集合分配编号: 新连接取新号; 10 分钟未见到的旧编号回收
+func (st *connSeqStore) assign(conns []api.ConnInfo) map[string]int {
+	now := time.Now().Unix()
+	for _, cn := range conns {
+		if _, ok := st.Maps[cn.ID]; !ok {
+			st.Seq++
+			st.Maps[cn.ID] = st.Seq
+		}
+		st.Seen[cn.ID] = now
+	}
+	for id, ts := range st.Seen {
+		if now-ts > 600 {
+			delete(st.Maps, id)
+			delete(st.Seen, id)
+		}
+	}
+	st.save()
+	return st.Maps
+}
+
 func printConns(c *api.Client) error {
 	r, err := c.Connections()
 	if err != nil {
@@ -56,20 +102,63 @@ func printConns(c *api.Client) error {
 	if len(r.Connections) == 0 {
 		return nil
 	}
-	rows := [][]string{{T("网络"), T("目标"), T("代理链"), "↑", "↓"}}
+	st := loadConnSeq().assign(r.Connections)
+	rows := [][]string{{"#", T("网络"), T("目标"), T("代理链"), "↑", "↓"}}
 	for _, cn := range r.Connections {
 		host := cn.Metadata.Host
 		if host == "" {
 			host = cn.Metadata.Destination
 		}
 		rows = append(rows, []string{
-			cn.Metadata.Network, host,
+			strconv.Itoa(st[cn.ID]), cn.Metadata.Network, host,
 			strings.Join(cn.Chains, "/"),
 			humanBytes(cn.Upload), humanBytes(cn.Download),
 		})
 	}
 	ui.Table(os.Stdout, rows, 2)
 	return nil
+}
+
+var connKillCmd = &cobra.Command{
+	Use:   "kill <编号|编号..>",
+	Short: T("关闭指定编号的活动连接"),
+	Args:  cobra.MinimumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		s := mustSettings()
+		c := api.New(s)
+		r, err := c.Connections()
+		if err != nil {
+			return err
+		}
+		st := loadConnSeq().assign(r.Connections)
+		bySeq := map[int]string{}
+		for id, n := range st {
+			bySeq[n] = id
+		}
+		killed := 0
+		for _, a := range args {
+			n, err := strconv.Atoi(a)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%s: %q\n", T("无效编号"), a)
+				continue
+			}
+			id, ok := bySeq[n]
+			if !ok {
+				fmt.Fprintf(os.Stderr, "#%d: %s\n", n, T("连接不存在或已关闭"))
+				continue
+			}
+			if err := c.CloseConn(id); err != nil {
+				fmt.Fprintf(os.Stderr, "#%d: %v\n", n, err)
+				continue
+			}
+			fmt.Printf("#%d %s\n", n, T("已关闭"))
+			killed++
+		}
+		if killed == 0 {
+			return fmt.Errorf("%s", T("没有连接被关闭"))
+		}
+		return nil
+	},
 }
 
 // ---- traffic ----
@@ -110,7 +199,7 @@ var logCmd = &cobra.Command{
 		if _, err := os.Stat(app.LogFile); err != nil {
 			return fmt.Errorf("%s (%s)", T("暂无日志"), app.LogFile)
 		}
-		c := exec.Command("tail", "-n", "100")
+		c := exec.Command("tail", "-n", "100", app.LogFile)
 		if logFollow {
 			c = exec.Command("tail", "-n", "100", "-f", app.LogFile)
 		}
@@ -228,12 +317,18 @@ sub-auto-update-interval <dur>   ` + T("订阅自动更新周期") + `, 如 12h 
 proxy-auto-select-enabled <bool>   ` + T("自动切换到最低延迟节点") + ` (作用于当前分组)
 proxy-auto-select-interval <dur>   ` + T("自动择优周期") + `, 如 15m
 test-url <url>                   ` + T("测速 URL") + `
-test-timeout <ms>                ` + T("测速超时(毫秒)") + `
-download-proxy <url>             ` + T("下载内核/订阅使用的代理 (空=直连)"),
-	Args: cobra.ExactArgs(2),
+test-timeout <ms>                ` + T("测速超时(毫秒)"),
+	Args: cobra.RangeArgs(0, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if len(args) == 0 {
+			return cmd.Help()
+		}
+		k := args[0]
+		if len(args) == 1 {
+			return setKeyHelp(k)
+		}
 		s := mustSettings()
-		k, v := args[0], args[1]
+		v := args[1]
 		b := func() bool {
 			return v == "true" || v == "on" || v == "yes" || v == "1"
 		}
@@ -281,8 +376,6 @@ download-proxy <url>             ` + T("下载内核/订阅使用的代理 (空=
 				return fmt.Errorf("%s", T("无效超时"))
 			}
 			s.TestTimeout = n
-		case "download-proxy":
-			s.DownloadProxy = v
 		default:
 			return fmt.Errorf("%s %q (mihomo-cli set --help)", T("未知配置项"), k)
 		}
@@ -335,7 +428,6 @@ var getCmd = &cobra.Command{
 			{"proxy-auto-select-interval", s.ProxyAutoSelectInterval.String()},
 			{"test-url", s.TestURL},
 			{"test-timeout", fmt.Sprintf("%dms", s.TestTimeout)},
-			{"download-proxy", s.DownloadProxy},
 			{"current-profile", s.CurrentProfile},
 			{"current-group", s.CurrentGroup},
 		}
@@ -355,6 +447,100 @@ var getCmd = &cobra.Command{
 		}
 		return fmt.Errorf("%s %q", T("未知配置项"), args[0])
 	},
+}
+
+// setKeyDocs 每个配置项的详细说明 (供 set <key> 单参数时显示)
+var setKeyDocs = map[string][2]string{
+	"lang":                        {T("输出语言"), "zh(" + T("中文") + ") | en(" + T("英文") + "); " + T("默认按系统 locale, 回退中文")},
+	"allow-lan":                   {T("允许局域网设备使用代理"), "true | false; true " + T("时监听 0.0.0.0")},
+	"mixed-port":                  {T("混合代理端口 (http+socks5)"), "1-65535; " + T("默认 7890")},
+	"proxy-mode":                  {T("代理模式"), "rule(" + T("规则分流") + ") | global(" + T("全部走当前选中节点") + ") | direct(" + T("全部直连") + ")"},
+	"sub-auto-update-enabled":     {T("订阅定时自动更新"), "true | false"},
+	"sub-auto-update-interval":    {T("订阅自动更新周期"), "1m-720h; " + T("如 12h / 30m")},
+	"proxy-auto-select-enabled":   {T("定时对当前分组自动择优"), "true | false; " + T("作用于当前 group use 的分组")},
+	"proxy-auto-select-interval":  {T("自动择优周期"), "1m-720h; " + T("如 15m")},
+	"test-url":                    {T("测速 URL"), "http(s)://...; " + T("建议 204 端点")},
+	"test-timeout":                {T("测速超时(毫秒)"), "100-60000"},
+}
+
+func setKeyHelp(k string) error {
+	d, ok := setKeyDocs[k]
+	if !ok {
+		return fmt.Errorf("%s %q (mihomo-cli set --help)", T("未知配置项"), k)
+	}
+	s := mustSettings()
+	cur := func() string {
+		switch k {
+		case "lang":
+			if s.Lang == "" {
+				return i18n.Lang() + " (auto)"
+			}
+			return s.Lang
+		case "allow-lan":
+			return fmt.Sprintf("%v", s.AllowLan)
+		case "mixed-port":
+			return fmt.Sprintf("%d", s.MixedPort)
+		case "proxy-mode":
+			if s.ProxyMode == "" {
+				return "rule (sub default)"
+			}
+			return s.ProxyMode
+		case "sub-auto-update-enabled":
+			return fmt.Sprintf("%v", s.SubAutoUpdateEnabled)
+		case "sub-auto-update-interval":
+			return s.SubAutoUpdateInterval.String()
+		case "proxy-auto-select-enabled":
+			return fmt.Sprintf("%v", s.ProxyAutoSelectEnabled)
+		case "proxy-auto-select-interval":
+			return s.ProxyAutoSelectInterval.String()
+		case "test-url":
+			return s.TestURL
+		case "test-timeout":
+			return fmt.Sprintf("%dms", s.TestTimeout)
+		}
+		return "-"
+	}()
+	fmt.Printf("%s\n  %s: %s\n  %s: %s\n  %s: %s\n  %s: mihomo-cli set %s <%s>\n",
+		k, T("说明"), d[0], T("可选值"), d[1], T("当前值"), cur, T("用法"), k, T("值"))
+	return nil
+}
+
+// settingKeys 有序 key 列表 (get/set 补全与展示)
+func settingKeys() []string {
+	return []string{
+		"lang", "allow-lan", "mixed-port", "proxy-mode",
+		"sub-auto-update-enabled", "sub-auto-update-interval",
+		"proxy-auto-select-enabled", "proxy-auto-select-interval",
+		"test-url", "test-timeout",
+	}
+}
+
+func setValueCandidates(k string) []string {
+	switch k {
+	case "lang":
+		return []string{"zh", "en"}
+	case "allow-lan", "sub-auto-update-enabled", "proxy-auto-select-enabled":
+		return []string{"true", "false"}
+	case "proxy-mode":
+		return []string{"rule", "global", "direct"}
+	}
+	return nil
+}
+
+func setValidArgs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	if len(args) == 0 {
+		var out []string
+		for _, k := range settingKeys() {
+			if strings.HasPrefix(k, toComplete) {
+				out = append(out, k)
+			}
+		}
+		return out, cobra.ShellCompDirectiveNoFileComp
+	}
+	if len(args) == 1 {
+		return setValueCandidates(args[0]), cobra.ShellCompDirectiveNoFileComp
+	}
+	return nil, cobra.ShellCompDirectiveNoFileComp
 }
 
 // ---- core ----
@@ -381,8 +567,7 @@ var coreUpgradeCmd = &cobra.Command{
 	Use:   "upgrade",
 	Short: T("升级内核 (从 GitHub Releases)"),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		s := mustSettings()
-		if err := core.Upgrade(s.DownloadProxy, false); err != nil {
+		if err := core.Upgrade(dlProxy, false); err != nil {
 			return err
 		}
 		if sysd.IsActive() {
@@ -408,7 +593,7 @@ var coreRollbackCmd = &cobra.Command{
 
 // ---- version ----
 
-var Version = "0.6.0"
+var Version = "0.7.0"
 
 var versionCmd = &cobra.Command{
 	Use: "version",
@@ -429,6 +614,8 @@ func humanBytes(n int64) string {
 	return fmt.Sprintf("%.1fPiB", f)
 }
 
+var dlProxy string
+
 var coreGeoCmd = &cobra.Command{
 	Use:   "geo",
 	Short: T("下载/更新 geo 数据 (geoip/geosite, 内核规则依赖)"),
@@ -438,7 +625,7 @@ var coreGeoCmd = &cobra.Command{
 		for _, f := range []string{"geoip.metadb", "GeoSite.dat"} {
 			_ = os.Remove(filepath.Join(app.RuntimeDir, f))
 		}
-		if err := core.DownloadGeo(s.DownloadProxy); err != nil {
+		if err := core.DownloadGeo(dlProxy); err != nil {
 			return err
 		}
 		fmt.Println(T("已下载"))
@@ -450,6 +637,20 @@ var coreGeoCmd = &cobra.Command{
 func init() {
 	connCmd.Flags().BoolVar(&connWatch, "watch", false, T("持续刷新"))
 	logCmd.Flags().BoolVarP(&logFollow, "follow", "f", false, T("跟随日志"))
+	setCmd.ValidArgsFunction = setValidArgs
+	getCmd.ValidArgsFunction = func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		if len(args) == 0 {
+			var out []string
+			for _, k := range settingKeys() {
+				if strings.HasPrefix(k, toComplete) {
+					out = append(out, k)
+				}
+			}
+			return out, cobra.ShellCompDirectiveNoFileComp
+		}
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
 	coreCmd.AddCommand(coreVersionCmd, coreUpgradeCmd, coreRollbackCmd, coreGeoCmd)
+	connCmd.AddCommand(connKillCmd)
 	rootCmd.AddCommand(connCmd, trafficCmd, logCmd, doctorCmd, setCmd, getCmd, coreCmd, versionCmd)
 }

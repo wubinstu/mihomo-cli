@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -72,6 +73,18 @@ var statusCmd = &cobra.Command{
 			lan = T("允许 (0.0.0.0)")
 		}
 		fmt.Printf("%-12s %s\n", T("局域网"), lan)
+		if len(s.DNSServers) == 0 {
+			fmt.Printf("%-12s %s\n", T("当前DNS"), T("跟随订阅"))
+		} else {
+			fmt.Printf("%-12s %s\n", T("当前DNS"), strings.Join(s.DNSServers, ", "))
+		}
+		if active {
+			if r, err := api.New(s).Connections(); err == nil {
+				fmt.Printf("%-12s ↑ %s  ↓ %s  (%d %s)\n", T("流量统计"),
+					humanBytes(r.UploadTotal), humanBytes(r.DownloadTotal),
+					len(r.Connections), T("活动连接"))
+			}
+		}
 		if p := s.Current(); p != nil {
 			fmt.Printf("%-12s sub%d:%s (%d %s, %s)\n", T("当前订阅"), subIndex(s, p.Name), p.Name, p.Nodes, T("节点"), p.UpdatedAt.Format("2006-01-02 15:04"))
 		} else {
@@ -119,10 +132,15 @@ func printTimers(s *app.Settings) {
 		fmt.Printf("%-12s %s\n", T("节点自动择优"), T("悬空 (group 未选)"))
 		return
 	}
-	last2 := humanTime(s.AutoSelectLastRun)
 	next2 := remaining(s.AutoSelectLastRun, s.ProxyAutoSelectInterval)
-	fmt.Printf("%-12s %s | %s %s | %s %s\n", T("节点自动择优"),
-		onOff2(s.ProxyAutoSelectEnabled), T("上次"), last2, T("下次"), next2)
+	last2 := humanTime(s.AutoSelectLastRun)
+	if s.ProxyAutoSelectEnabled {
+		fmt.Printf("%-12s %s | %s %s | %s %s\n", T("节点自动择优"),
+			onOff2(s.ProxyAutoSelectEnabled), T("上次"), last2, T("下次"), next2)
+	} else {
+		fmt.Printf("%-12s %s | %s %s\n", T("节点自动择优"),
+			onOff2(s.ProxyAutoSelectEnabled), T("上次"), last2)
+	}
 }
 
 func onOff2(b bool) string {

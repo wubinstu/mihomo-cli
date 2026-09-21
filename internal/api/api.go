@@ -143,6 +143,24 @@ func (c *Client) CloseConns() error {
 	return nil
 }
 
+// CloseConn 关闭指定连接
+func (c *Client) CloseConn(id string) error {
+	req, err := http.NewRequest("DELETE", c.base+"/connections/"+url.PathEscape(id), nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.secret)
+	resp, err := c.hc.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 204 && resp.StatusCode != 200 {
+		return fmt.Errorf("close %d", resp.StatusCode)
+	}
+	return nil
+}
+
 // Reload 热重载配置文件
 func (c *Client) Reload(path string) error {
 	resp, err := c.do("PUT", "/configs?force=true", map[string]string{"path": path})

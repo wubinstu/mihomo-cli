@@ -80,13 +80,13 @@ func CountNodes(data []byte) int {
 }
 
 // Add 新增订阅: 下载 + 保存 + 生效
-func Add(s *app.Settings, name, rawurl string) error {
+func Add(s *app.Settings, name, rawurl, proxy string) error {
 	name = Sanitize(name)
 	if s.FindProfile(name) != nil {
 		return fmt.Errorf("%s %q %s", i18n.T("订阅"), name, i18n.T("已存在"))
 	}
 	fmt.Printf("%s %s ...\n", i18n.T("下载订阅"), rawurl)
-	data, info, err := Download(rawurl, s.DownloadProxy)
+	data, info, err := Download(rawurl, proxy)
 	if err != nil {
 		return err
 	}
@@ -107,7 +107,7 @@ func Add(s *app.Settings, name, rawurl string) error {
 }
 
 // Update 更新订阅(空名 = 当前订阅; all = 全部)
-func Update(s *app.Settings, name string) error {
+func Update(s *app.Settings, name, proxy string) error {
 	targets := []*app.Profile{}
 	if name == "all" {
 		for i := range s.Profiles {
@@ -130,7 +130,7 @@ func Update(s *app.Settings, name string) error {
 	var errs []string
 	for _, p := range targets {
 		fmt.Printf("%s [%s] ...\n", i18n.T("更新订阅"), p.Name)
-		data, info, err := Download(p.URL, s.DownloadProxy)
+		data, info, err := Download(p.URL, proxy)
 		if err != nil {
 			errs = append(errs, fmt.Sprintf("%s: %v", p.Name, err))
 			continue

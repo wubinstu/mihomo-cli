@@ -20,13 +20,14 @@ import (
 
 const cliRepoAPI = "https://api.github.com/repos/wubinstu/mihomo-cli/releases/latest"
 
+var updProxy string
+
 var updateCmd = &cobra.Command{
 	Use:     "update",
 	Aliases: []string{"upgrade"},
 	Short:   T("更新 mihomo-cli 自身 (从 GitHub Releases)"),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		s := mustSettings()
-		hc := core.HTTPClient(s.DownloadProxy)
+		hc := core.HTTPClient(updProxy)
 
 		tag, assetURL, err := latestCLI(hc)
 		if err != nil {
@@ -169,5 +170,8 @@ func cliArchAsset() string {
 }
 
 func init() {
+	updateCmd.Flags().StringVar(&updProxy, "proxy", "", T("下载使用的代理 (空=按环境变量/直连)"))
+	coreUpgradeCmd.Flags().StringVar(&dlProxy, "proxy", "", T("下载使用的代理 (空=按环境变量/直连)"))
+	coreGeoCmd.Flags().StringVar(&dlProxy, "proxy", "", T("下载使用的代理 (空=按环境变量/直连)"))
 	rootCmd.AddCommand(updateCmd)
 }

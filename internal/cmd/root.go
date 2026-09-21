@@ -25,8 +25,21 @@ eval $(mihomo-cli proxy on) ` + T("当前 shell 开启代理"),
 }
 
 func Execute() {
+	// 所有子命令禁用文件路径补全 (避免补全末端落到文件名)
+	disableFileComp(rootCmd)
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
+	}
+}
+
+func disableFileComp(c *cobra.Command) {
+	for _, sub := range c.Commands() {
+		if sub.ValidArgsFunction == nil {
+			sub.ValidArgsFunction = func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+				return nil, cobra.ShellCompDirectiveNoFileComp
+			}
+		}
+		disableFileComp(sub)
 	}
 }
 
