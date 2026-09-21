@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/wubinstu/mihomo-cli/internal/app"
+	"github.com/wubinstu/mihomo-cli/internal/i18n"
 )
 
 type Client struct {
@@ -49,7 +50,7 @@ func (c *Client) do(method, path string, body any) (*http.Response, error) {
 func (c *Client) GetJSON(path string, out any) error {
 	resp, err := c.do("GET", path, nil)
 	if err != nil {
-		return fmt.Errorf("无法连接 mihomo API(服务是否已启动?): %w", err)
+		return fmt.Errorf("%s: %w", i18n.T("无法连接 mihomo API(服务是否已启动?)"), err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
@@ -88,7 +89,7 @@ func (c *Client) SetProxy(group, node string) error {
 	defer resp.Body.Close()
 	if resp.StatusCode != 204 && resp.StatusCode != 200 {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return fmt.Errorf("切换失败 %d: %s", resp.StatusCode, string(b))
+		return fmt.Errorf("%s %d: %s", i18n.T("切换失败"), resp.StatusCode, string(b))
 	}
 	return nil
 }
@@ -172,7 +173,7 @@ func (c *Client) Reload(path string) error {
 	defer resp.Body.Close()
 	if resp.StatusCode != 204 && resp.StatusCode != 200 {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return fmt.Errorf("热重载失败 %d: %s", resp.StatusCode, string(b))
+		return fmt.Errorf("%s %d: %s", i18n.T("警告: 热重载失败"), resp.StatusCode, string(b))
 	}
 	return nil
 }
@@ -186,7 +187,7 @@ func (c *Client) SetMode(mode string) error {
 	defer resp.Body.Close()
 	if resp.StatusCode != 204 && resp.StatusCode != 200 {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return fmt.Errorf("切换模式失败 %d: %s", resp.StatusCode, string(b))
+		return fmt.Errorf("%s %d: %s", i18n.T("切换失败"), resp.StatusCode, string(b))
 	}
 	return nil
 }

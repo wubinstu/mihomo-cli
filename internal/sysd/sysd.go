@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/wubinstu/mihomo-cli/internal/app"
+	"github.com/wubinstu/mihomo-cli/internal/i18n"
 )
 
 const unitDir = "/etc/systemd/system"
@@ -75,7 +76,7 @@ WantedBy=multi-user.target
 // InstallService 安装并 enable 主服务
 func InstallService() error {
 	if err := writeUnit(serviceName, ServiceUnit()); err != nil {
-		return fmt.Errorf("写入 systemd 单元失败(需要 root): %w", err)
+		return fmt.Errorf("%s: %w", i18n.T("写入 systemd 单元失败(需要 root)"), err)
 	}
 	if err := daemonReload(); err != nil {
 		return err

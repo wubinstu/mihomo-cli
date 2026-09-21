@@ -106,7 +106,7 @@ func nodeListRun(cmd *cobra.Command, args []string) error {
 }
 
 var nodeUseCmd = &cobra.Command{
-	Use:   "use <id|名称>",
+	Use:   "use <id|name>",
 	Short: T("切换当前分组到指定节点"),
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -208,9 +208,8 @@ var nodeTestCmd = &cobra.Command{
 var nodeAutoCmd = &cobra.Command{
 	Use:   "auto",
 	Short: T("对当前分组测速并切换到延迟最低的节点"),
-	Long: `仅在当前 use 的分组 (sub->group 链路) 内, 于真实节点(排除子分组/DIRECT/REJECT)中
-选择延迟最低者切换。定时任务 (node-auto-select-enabled) 周期性执行本命令。
-未设置当前分组时跳过 (group use <id|名称>)。`,
+	Long: T("仅在当前 use 的分组内, 于真实节点(排除子分组/DIRECT/REJECT)中选择延迟最低者切换;") + "\n" +
+		T("定时任务 (node-auto-select-enabled) 周期性执行本命令; 未设置当前分组时跳过。"),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		s := mustSettings()
 		c := api.New(s)
@@ -266,7 +265,7 @@ func nil2map(c *api.Client) map[string]api.Proxy {
 
 func init() {
 	for _, sub := range []*cobra.Command{nodeCmd, nodeUseCmd, nodeUnuseCmd, nodeTestCmd, nodeAutoCmd} {
-		sub.Flags().StringVarP(&nodeGroupFlag, "group", "g", "", T("分组")+" (id|名称)")
+		sub.Flags().StringVarP(&nodeGroupFlag, "group", "g", "", T("分组")+" (id|name)")
 	}
 	nodeCmd.AddCommand(nodeListCmd, nodeUseCmd, nodeUnuseCmd, nodeTestCmd, nodeAutoCmd)
 	rootCmd.AddCommand(nodeCmd)

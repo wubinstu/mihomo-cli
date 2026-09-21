@@ -20,12 +20,12 @@ import (
 var topInterval = 1
 
 var topCmd = &cobra.Command{
-	Use:   "top [watch] [秒]",
+	Use:   "top [watch] [sec]",
 	Short: T("流量与连接总览 (top watch 持续刷新, top kill <编号> 关连接)"),
 	Long: T("流量与连接总览") + `:
   mihomo-cli top              # ` + T("单次输出: 总流量/速度/连接数/连接列表") + `
   mihomo-cli top watch [N]    # ` + T("每 N 秒刷新 (默认 1s), Ctrl-C 退出") + `
-  mihomo-cli top kill <编号..> # ` + T("关闭指定编号的连接"),
+  mihomo-cli top kill <id..>  # ` + T("关闭指定编号的连接"),
 	Args: cobra.MaximumNArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		s := mustSettings()
@@ -181,7 +181,7 @@ func (st *connSeqStore) assign(conns []api.ConnInfo) map[string]int {
 }
 
 var topKillCmd = &cobra.Command{
-	Use:   "kill <编号|编号..>",
+	Use:   "kill <id..>",
 	Short: T("关闭指定编号的活动连接"),
 	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {

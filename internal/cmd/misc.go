@@ -144,12 +144,12 @@ var setCmd = &cobra.Command{
 	Short: T("修改设置并生效"),
 	Long: `lang <zh|en>                     ` + T("输出语言 (默认按系统 locale, 回退中文)") + `
 allow-lan <true|false>           ` + T("允许局域网设备使用代理 (0.0.0.0)") + `
-mixed-port <port>                ` + T("混合代理端口 (默认 7890)") + `
+mixed-port <port>                ` + T("混合代理端口 (http+socks5)") + ", " + T("默认 7890") + `
 proxy-mode <rule|global|direct>  ` + T("代理模式 (热切换)") + `
-sub-auto-update-enabled <bool>   ` + T("订阅自动更新开关") + `
-sub-auto-update-interval <dur>   ` + T("订阅自动更新周期") + `, 如 12h / 30m
-node-auto-select-enabled <bool>   ` + T("自动切换到最低延迟节点") + ` (作用于当前分组)
-node-auto-select-interval <dur>   ` + T("自动择优周期") + `, 如 15m
+sub-auto-update-enabled <bool>   ` + T("订阅定时自动更新") + `
+sub-auto-update-interval <dur>   ` + T("订阅自动更新周期") + ", " + T("如 12h / 30m") + `
+node-auto-select-enabled <bool>   ` + T("自动切换到最低延迟节点") + " (" + T("定时对当前分组自动择优") + ")" + `
+node-auto-select-interval <dur>   ` + T("自动择优周期") + ", " + T("如 15m") + `
 test-url <url>                   ` + T("测速 URL") + `
 test-timeout <ms>                ` + T("测速超时(毫秒)"),
 	Args: cobra.RangeArgs(0, 2),
@@ -427,7 +427,7 @@ var coreRollbackCmd = &cobra.Command{
 
 // ---- version ----
 
-var Version = "0.8.0"
+var Version = "0.8.1"
 
 var versionCmd = &cobra.Command{
 	Use: "version",

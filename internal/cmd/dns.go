@@ -56,7 +56,7 @@ var dnsCmd = &cobra.Command{
 	Short: T("查看/设置 DNS (预设或自定义 IP)"),
 	Long: T("自定义 DNS 会覆盖订阅中的 dns.nameserver; unuse 恢复跟随订阅。") + `
 mihomo-cli dns               # ` + T("查看当前 DNS") + `
-mihomo-cli dns use <预设>     # ` + T("使用预设") + `: ` + presetNames() + `
+mihomo-cli dns use <preset>  # ` + T("使用预设") + `: ` + presetNames() + `
 mihomo-cli dns use <ip...>    # ` + T("自定义 DNS 服务器 IP"),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		s := mustSettings()
@@ -110,7 +110,7 @@ func presetNames() string {
 }
 
 var dnsUseCmd = &cobra.Command{
-	Use:   "use <预设|sub#|ip...>",
+	Use:   "use <preset|sub#|ip...>",
 	Short: T("设置 DNS (预设名/订阅编号/1-3 个 IP)"),
 	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {

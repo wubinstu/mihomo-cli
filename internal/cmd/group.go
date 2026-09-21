@@ -211,7 +211,7 @@ var groupCmd = &cobra.Command{
 }
 
 var groupUseCmd = &cobra.Command{
-	Use:   "use <id|名称>",
+	Use:   "use <id|name>",
 	Short: T("设置当前操作分组"),
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {

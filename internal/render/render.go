@@ -53,11 +53,11 @@ func Generate(s *app.Settings) error {
 	}
 	data, err := os.ReadFile(subs.Path(p.Name))
 	if err != nil {
-		return fmt.Errorf("读取订阅文件失败: %w", err)
+		return fmt.Errorf("%s: %w", i18n.T("读取订阅文件失败"), err)
 	}
 	var cfg map[string]any
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return fmt.Errorf("订阅配置解析失败: %w", err)
+		return fmt.Errorf("%s: %w", i18n.T("订阅配置解析失败"), err)
 	}
 	if cfg == nil {
 		cfg = map[string]any{}

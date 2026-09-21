@@ -275,7 +275,7 @@ func removeCompletions() {
 }
 
 func init() {
-	installCmd.Flags().StringVar(&installProxy, "proxy", "", T("下载内核使用的代理")+", 如 http://192.168.1.1:7890")
+	installCmd.Flags().StringVar(&installProxy, "proxy", "", T("下载内核使用的代理")+", "+T("如")+" http://192.168.1.1:7890")
 	installCmd.Flags().StringVar(&installSub, "sub", "", T("订阅链接")+"("+T("跳过交互式 init")+")")
 	installCmd.Flags().BoolVar(&installCompatible, "compatible", false, T("使用 amd64-compatible 内核(老旧 CPU)"))
 	installCmd.Flags().BoolVar(&installAllowLan, "allow-lan", false, T("允许局域网设备使用代理 (0.0.0.0)"))
