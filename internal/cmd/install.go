@@ -63,7 +63,7 @@ var installCmd = &cobra.Command{
 				return err
 			}
 			fmt.Printf("%s: %s (arch=%s)\n", T("最新内核版本"), rel.TagName, core.ArchName())
-			if err := core.DownloadInstall(rel.TagName, installProxy, installCompatible); err != nil {
+			if err := core.DownloadInstall(rel.TagName, installProxy, s.InstallMirror, installCompatible); err != nil {
 				return err
 			}
 		} else {
@@ -76,7 +76,7 @@ var installCmd = &cobra.Command{
 
 		// 2. geo 数据预下载 (避免内核首次启动直连 GitHub 下载 MMDB 失败导致 fatal 循环)
 		fmt.Println(T("预下载 geo 数据 (geoip/geosite) ..."))
-		if err := core.DownloadGeo(installProxy); err != nil {
+		if err := core.DownloadGeo(installProxy, s.InstallMirror); err != nil {
 			fmt.Fprintf(os.Stderr, "%s: %v\n", T("警告: geo 数据下载失败"), err)
 		}
 

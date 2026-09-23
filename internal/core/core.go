@@ -104,7 +104,7 @@ func tagFromRedirect(hc *http.Client) string {
 }
 
 // DownloadInstall 下载指定 tag 的内核并安装到 CoreBin, 旧版本备份为 mihomo.old
-func DownloadInstall(tag, proxy string, compatible bool) error {
+func DownloadInstall(tag, proxy, mirrorPref string, compatible bool) error {
 	arch := ArchName()
 	if compatible && arch == "amd64" {
 		arch = "amd64-compatible" // 旧 CPU 无 AVX 时使用
@@ -215,10 +215,133 @@ func Upgrade(proxy string, pre bool) error {
 		return nil
 	}
 	fmt.Printf("%s: %s -> %s\n", i18n.T("升级内核:"), curVer, rel.TagName)
-	return DownloadInstall(rel.TagName, proxy, false)
+	return DownloadInstall(rel.TagName, proxy, s_mirror(), false)
+}
+
+func s_mirror() string {
+	s, err := app.LoadSettings()
+	if err != nil {
+		return ""
+	}
+	return s.InstallMirror
 }
 
 func CoreBinPath() string { return filepath.Clean(app.CoreBin) }
+
+// GitHub 镜像站 (下载失败时依次尝试; 可通过 settings install-mirror 指定)
+var ghMirrors = []string{
+	"https://ghfast.top",
+	"https://gh-proxy.com",
+	"https://mirror.ghproxy.com",
+}
+
+// MirrorURLs 返回 GitHub 资产的候选 URL: 镜像站格式为 <mirror>/<原始URL>
+func MirrorURLs(u, preferred string) []string {
+	out := []string{u}
+	mirrors := ghMirrors
+	if preferred != "" {
+		mirrors = append([]string{preferred}, mirrors...)
+	}
+	for _, m := range mirrors {
+		m = strings.TrimRight(m, "/")
+		if strings.Contains(u, m) {
+			continue
+		}
+		out = append(out, m+"/"+u)
+	}
+	return out
+}
+
+// OwnProxy 若本机代理服务存活且链路可用, 返回自身代理地址 (下载优先走自己)
+func OwnProxy() string {
+	s, err := app.LoadSettings()
+	if err != nil || s.Current() == nil || !chainReady(s) {
+		return ""
+	}
+	addr := fmt.Sprintf("http://127.0.0.1:%d", s.MixedPort)
+	c := http.Client{Timeout: 2 * time.Second, Transport: &http.Transport{Proxy: http.ProxyURL(parseURL(addr))}}
+	req, _ := http.NewRequest("GET", "https://www.gstatic.com/generate_204", nil)
+	resp, err := c.Do(req)
+	if err != nil || resp.StatusCode != 204 {
+		return ""
+	}
+	resp.Body.Close()
+	return addr
+}
+
+func chainReady(s *app.Settings) bool {
+	return s.CurrentGroup != "" // sub->group 已选即视为链路有效
+}
+
+func parseURL(u string) *url.URL {
+	p, _ := url.Parse(u)
+	return p
+}
+
+// FetchURL 依次尝试候选 URL: 指定代理 -> 自身代理 -> 各镜像 -> 直连
+func FetchURL(u, proxy, mirror, dst string) error {
+	return fetch(u, proxy, mirror, dst, func(r io.Reader, f *os.File) (int64, error) { return io.Copy(f, r) })
+}
+
+// FetchGunzip 同 FetchURL 但做 gunzip 解压 (内核二进制)
+func FetchGunzip(u, proxy, mirror, dst string) error {
+	return fetch(u, proxy, mirror, dst, func(r io.Reader, f *os.File) (int64, error) {
+		gz, err := gzip.NewReader(r)
+		if err != nil {
+			return 0, err
+		}
+		defer gz.Close()
+		return io.Copy(f, gz)
+	})
+}
+
+func fetch(u, proxy, mirror, dst string, process func(io.Reader, *os.File) (int64, error)) error {
+	proxies := []string{}
+	if proxy != "" {
+		proxies = append(proxies, proxy)
+	}
+	if own := OwnProxy(); own != "" && own != proxy {
+		proxies = append(proxies, own)
+	}
+	urls := MirrorURLs(u, mirror)
+	var lastErr error
+	for _, p := range append(proxies, "") {
+		for _, uu := range urls {
+			f, err := os.OpenFile(dst, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o755)
+			if err != nil {
+				return err
+			}
+			req, _ := http.NewRequest("GET", uu, nil)
+			req.Header.Set("User-Agent", "mihomo-cli")
+			hc := HTTPClient(p)
+			hc.Timeout = 10 * time.Minute
+			resp, err := hc.Do(req)
+			if err != nil {
+				f.Close()
+				os.Remove(dst)
+				lastErr = err
+				continue
+			}
+			if resp.StatusCode != 200 {
+				resp.Body.Close()
+				f.Close()
+				os.Remove(dst)
+				lastErr = fmt.Errorf("HTTP %d (%s)", resp.StatusCode, shortURL(uu))
+				continue
+			}
+			n, err := process(resp.Body, f)
+			resp.Body.Close()
+			f.Close()
+			if err != nil || n == 0 {
+				os.Remove(dst)
+				lastErr = err
+				continue
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("%s: %w", i18n.T("下载失败"), lastErr)
+}
 
 // geo 数据源: 镜像在前 (国内可达), GitHub 官方兜底
 var geoMirrors = map[string][]string{
@@ -233,7 +356,7 @@ var geoMirrors = map[string][]string{
 }
 
 // DownloadGeo 预下载 geo 数据到 runtime 目录, 避免内核启动时直连 GitHub 下载失败导致 fatal 循环
-func DownloadGeo(proxy string) error {
+func DownloadGeo(proxy, mirrorPref string) error {
 	for name, urls := range geoMirrors {
 		dst := filepath.Join(app.RuntimeDir, name)
 		if _, err := os.Stat(dst); err == nil {
@@ -243,7 +366,7 @@ func DownloadGeo(proxy string) error {
 		for _, u := range urls {
 			for attempt := 1; attempt <= 3; attempt++ {
 				fmt.Printf("%s %s (%s, %d/3) ...\n", i18n.T("下载"), name, shortURL(u), attempt)
-				if err := downloadPlain(u, proxy, dst+".tmp"); err != nil {
+				if err := FetchURL(u, proxy, mirrorPref, dst+".tmp"); err != nil {
 					lastErr = err
 					fmt.Printf("  %s: %v\n", i18n.T("下载失败"), err)
 					continue

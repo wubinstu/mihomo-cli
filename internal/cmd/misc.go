@@ -7,8 +7,6 @@ import (
 	"path/filepath"
 	"os/exec"
 	"runtime"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -16,10 +14,7 @@ import (
 	"github.com/wubinstu/mihomo-cli/internal/api"
 	"github.com/wubinstu/mihomo-cli/internal/app"
 	"github.com/wubinstu/mihomo-cli/internal/core"
-	"github.com/wubinstu/mihomo-cli/internal/i18n"
-	"github.com/wubinstu/mihomo-cli/internal/render"
 	"github.com/wubinstu/mihomo-cli/internal/sysd"
-	"github.com/wubinstu/mihomo-cli/internal/ui"
 )
 
 // ---- log ----
@@ -30,6 +25,22 @@ var logCmd = &cobra.Command{
 	Use:   "log",
 	Short: T("查看内核日志 (-f 跟随)"),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		jargs := []string{"-u", "mihomo-cli", "--no-pager", "-n", "100"}
+		if logFollow {
+			jargs = append(jargs, "-f")
+		}
+		if _, err := exec.LookPath("journalctl"); err == nil {
+			bin := "journalctl"
+			if os.Geteuid() != 0 {
+				// system journal 需要 root/adm 组; 非 root 自动 sudo
+				bin = "sudo"
+				jargs = append([]string{"-n", "journalctl"}, jargs...)
+			}
+			c := exec.Command(bin, jargs...)
+			c.Stdout = os.Stdout
+			c.Stderr = os.Stderr
+			return c.Run()
+		}
 		if _, err := os.Stat(app.LogFile); err != nil {
 			return fmt.Errorf("%s (%s)", T("暂无日志"), app.LogFile)
 		}
@@ -137,246 +148,6 @@ func portOpen(addr string) bool {
 	return true
 }
 
-// ---- set / get ----
-
-var setCmd = &cobra.Command{
-	Use:   "set <key> <value>",
-	Short: T("修改设置并生效"),
-	Long: `lang <zh|en>                     ` + T("输出语言 (默认按系统 locale, 回退中文)") + `
-allow-lan <true|false>           ` + T("允许局域网设备使用代理 (0.0.0.0)") + `
-mixed-port <port>                ` + T("混合代理端口 (http+socks5)") + ", " + T("默认 7890") + `
-proxy-mode <rule|global|direct>  ` + T("代理模式 (热切换)") + `
-sub-auto-update-enabled <bool>   ` + T("订阅定时自动更新") + `
-sub-auto-update-interval <dur>   ` + T("订阅自动更新周期") + ", " + T("如 12h / 30m") + `
-node-auto-select-enabled <bool>   ` + T("自动切换到最低延迟节点") + " (" + T("定时对当前分组自动择优") + ")" + `
-node-auto-select-interval <dur>   ` + T("自动择优周期") + ", " + T("如 15m") + `
-test-url <url>                   ` + T("测速 URL") + `
-test-timeout <ms>                ` + T("测速超时(毫秒)"),
-	Args: cobra.RangeArgs(0, 2),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		if len(args) == 0 {
-			return cmd.Help()
-		}
-		k := args[0]
-		if len(args) == 1 {
-			return setKeyHelp(k)
-		}
-		s := mustSettings()
-		v := args[1]
-		b := func() bool {
-			return v == "true" || v == "on" || v == "yes" || v == "1"
-		}
-		switch k {
-		case "lang":
-			if v != "zh" && v != "en" {
-				return fmt.Errorf("%s", T("lang 仅支持 zh / en"))
-			}
-			s.Lang = v
-			i18n.Set(v)
-		case "allow-lan":
-			s.AllowLan = b()
-		case "mixed-port":
-			n, err := strconv.Atoi(v)
-			if err != nil || n < 1 || n > 65535 {
-				return fmt.Errorf("%s", T("无效端口"))
-			}
-			s.MixedPort = n
-		case "proxy-mode":
-			if v != "rule" && v != "global" && v != "direct" {
-				return fmt.Errorf("%s", T("proxy-mode 仅支持 rule / global / direct"))
-			}
-			s.ProxyMode = v
-		case "sub-auto-update-enabled":
-			s.SubAutoUpdateEnabled = b()
-		case "sub-auto-update-interval":
-			d, err := time.ParseDuration(v)
-			if err != nil || d < time.Minute {
-				return fmt.Errorf("%s", T("无效周期 (>=1m), 如 12h"))
-			}
-			s.SubAutoUpdateInterval = d
-		case "node-auto-select-enabled":
-			s.NodeAutoSelectEnabled = b()
-		case "node-auto-select-interval":
-			d, err := time.ParseDuration(v)
-			if err != nil || d < time.Minute {
-				return fmt.Errorf("%s", T("无效周期 (>=1m), 如 15m"))
-			}
-			s.NodeAutoSelectInterval = d
-		case "test-url":
-			s.TestURL = v
-		case "test-timeout":
-			n, err := strconv.Atoi(v)
-			if err != nil || n < 100 {
-				return fmt.Errorf("%s", T("无效超时"))
-			}
-			s.TestTimeout = n
-		default:
-			return fmt.Errorf("%s %q (mihomo-cli set --help)", T("未知配置项"), k)
-		}
-		if err := s.Save(); err != nil {
-			return err
-		}
-		fmt.Printf("%s = %s %s\n", k, v, T("已保存"))
-		// proxy-mode 轻量热切换, 不做整配置 reload
-		if k == "proxy-mode" && sysd.IsActive() {
-			if err := api.New(s).SetMode(v); err != nil {
-				return err
-			}
-			fmt.Println(T("已热重载配置"))
-			return nil
-		}
-		// 重建运行配置 + 定时器 + 热重载
-		if s.Current() != nil {
-			if err := render.Generate(s); err == nil {
-				reloadIfActive(s)
-			}
-		}
-		if err := sysd.InstallTimers(s); err != nil {
-			fmt.Fprintf(os.Stderr, "%s: %v\n", T("警告: 更新定时器失败"), err)
-		}
-		return nil
-	},
-}
-
-var getCmd = &cobra.Command{
-	Use:   "get [key]",
-	Short: T("查看设置 (无参数 = 全部)"),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		s := mustSettings()
-		lang := s.Lang
-		if lang == "" {
-			lang = i18n.Lang() + " (auto)"
-		}
-		mode := s.ProxyMode
-		if mode == "" {
-			mode = "rule (sub default)"
-		}
-		all := [][2]string{
-			{"lang", lang},
-			{"allow-lan", fmt.Sprintf("%v", s.AllowLan)},
-			{"mixed-port", fmt.Sprintf("%d", s.MixedPort)},
-			{"proxy-mode", mode},
-			{"sub-auto-update-enabled", fmt.Sprintf("%v", s.SubAutoUpdateEnabled)},
-			{"sub-auto-update-interval", s.SubAutoUpdateInterval.String()},
-			{"node-auto-select-enabled", fmt.Sprintf("%v", s.NodeAutoSelectEnabled)},
-			{"node-auto-select-interval", s.NodeAutoSelectInterval.String()},
-			{"test-url", s.TestURL},
-			{"test-timeout", fmt.Sprintf("%dms", s.TestTimeout)},
-			{"current-profile", s.CurrentProfile},
-			{"current-group", s.CurrentGroup},
-		}
-		if len(args) == 0 {
-			rows := [][]string{{"KEY", "VALUE"}}
-			for _, e := range all {
-				rows = append(rows, []string{e[0], e[1]})
-			}
-			ui.Table(os.Stdout, rows, 3)
-			return nil
-		}
-		for _, e := range all {
-			if e[0] == args[0] {
-				fmt.Println(e[1])
-				return nil
-			}
-		}
-		return fmt.Errorf("%s %q", T("未知配置项"), args[0])
-	},
-}
-
-// setKeyDocs 每个配置项的详细说明 (供 set <key> 单参数时显示)
-var setKeyDocs = map[string][2]string{
-	"lang":                        {T("输出语言"), "zh(" + T("中文") + ") | en(" + T("英文") + "); " + T("默认按系统 locale, 回退中文")},
-	"allow-lan":                   {T("允许局域网设备使用代理"), "true | false; true " + T("时监听 0.0.0.0")},
-	"mixed-port":                  {T("混合代理端口 (http+socks5)"), "1-65535; " + T("默认 7890")},
-	"proxy-mode":                  {T("代理模式"), "rule(" + T("规则分流") + ") | global(" + T("全部走当前选中节点") + ") | direct(" + T("全部直连") + ")"},
-	"sub-auto-update-enabled":     {T("订阅定时自动更新"), "true | false"},
-	"sub-auto-update-interval":    {T("订阅自动更新周期"), "1m-720h; " + T("如 12h / 30m")},
-	"node-auto-select-enabled":   {T("定时对当前分组自动择优"), "true | false; " + T("作用于当前 group use 的分组")},
-	"node-auto-select-interval":  {T("自动择优周期"), "1m-720h; " + T("如 15m")},
-	"test-url":                    {T("测速 URL"), "http(s)://...; " + T("建议 204 端点")},
-	"test-timeout":                {T("测速超时(毫秒)"), "100-60000"},
-}
-
-func setKeyHelp(k string) error {
-	d, ok := setKeyDocs[k]
-	if !ok {
-		return fmt.Errorf("%s %q (mihomo-cli set --help)", T("未知配置项"), k)
-	}
-	s := mustSettings()
-	cur := func() string {
-		switch k {
-		case "lang":
-			if s.Lang == "" {
-				return i18n.Lang() + " (auto)"
-			}
-			return s.Lang
-		case "allow-lan":
-			return fmt.Sprintf("%v", s.AllowLan)
-		case "mixed-port":
-			return fmt.Sprintf("%d", s.MixedPort)
-		case "proxy-mode":
-			if s.ProxyMode == "" {
-				return "rule (sub default)"
-			}
-			return s.ProxyMode
-		case "sub-auto-update-enabled":
-			return fmt.Sprintf("%v", s.SubAutoUpdateEnabled)
-		case "sub-auto-update-interval":
-			return s.SubAutoUpdateInterval.String()
-		case "node-auto-select-enabled":
-			return fmt.Sprintf("%v", s.NodeAutoSelectEnabled)
-		case "node-auto-select-interval":
-			return s.NodeAutoSelectInterval.String()
-		case "test-url":
-			return s.TestURL
-		case "test-timeout":
-			return fmt.Sprintf("%dms", s.TestTimeout)
-		}
-		return "-"
-	}()
-	fmt.Printf("%s\n  %s: %s\n  %s: %s\n  %s: %s\n  %s: mihomo-cli set %s <%s>\n",
-		k, T("说明"), d[0], T("可选值"), d[1], T("当前值"), cur, T("用法"), k, T("值"))
-	return nil
-}
-
-// settingKeys 有序 key 列表 (get/set 补全与展示)
-func settingKeys() []string {
-	return []string{
-		"lang", "allow-lan", "mixed-port", "proxy-mode",
-		"sub-auto-update-enabled", "sub-auto-update-interval",
-		"node-auto-select-enabled", "node-auto-select-interval",
-		"test-url", "test-timeout",
-	}
-}
-
-func setValueCandidates(k string) []string {
-	switch k {
-	case "lang":
-		return []string{"zh", "en"}
-	case "allow-lan", "sub-auto-update-enabled", "node-auto-select-enabled":
-		return []string{"true", "false"}
-	case "proxy-mode":
-		return []string{"rule", "global", "direct"}
-	}
-	return nil
-}
-
-func setValidArgs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-	if len(args) == 0 {
-		var out []string
-		for _, k := range settingKeys() {
-			if strings.HasPrefix(k, toComplete) {
-				out = append(out, k)
-			}
-		}
-		return out, cobra.ShellCompDirectiveNoFileComp
-	}
-	if len(args) == 1 {
-		return setValueCandidates(args[0]), cobra.ShellCompDirectiveNoFileComp
-	}
-	return nil, cobra.ShellCompDirectiveNoFileComp
-}
-
 // ---- core ----
 
 var coreCmd = &cobra.Command{
@@ -427,7 +198,7 @@ var coreRollbackCmd = &cobra.Command{
 
 // ---- version ----
 
-var Version = "0.9.0"
+var Version = "1.0.0"
 
 var versionCmd = &cobra.Command{
 	Use: "version",
@@ -459,7 +230,7 @@ var coreGeoCmd = &cobra.Command{
 		for _, f := range []string{"geoip.metadb", "GeoSite.dat"} {
 			_ = os.Remove(filepath.Join(app.RuntimeDir, f))
 		}
-		if err := core.DownloadGeo(dlProxy); err != nil {
+		if err := core.DownloadGeo(dlProxy, mustSettings().InstallMirror); err != nil {
 			return err
 		}
 		fmt.Println(T("已下载"))
@@ -470,19 +241,6 @@ var coreGeoCmd = &cobra.Command{
 
 func init() {
 	logCmd.Flags().BoolVarP(&logFollow, "follow", "f", false, T("跟随日志"))
-	setCmd.ValidArgsFunction = setValidArgs
-	getCmd.ValidArgsFunction = func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-		if len(args) == 0 {
-			var out []string
-			for _, k := range settingKeys() {
-				if strings.HasPrefix(k, toComplete) {
-					out = append(out, k)
-				}
-			}
-			return out, cobra.ShellCompDirectiveNoFileComp
-		}
-		return nil, cobra.ShellCompDirectiveNoFileComp
-	}
 	coreCmd.AddCommand(coreVersionCmd, coreUpgradeCmd, coreRollbackCmd, coreGeoCmd)
-	rootCmd.AddCommand(logCmd, doctorCmd, setCmd, getCmd, coreCmd, versionCmd)
+	rootCmd.AddCommand(logCmd, doctorCmd, coreCmd, versionCmd)
 }

@@ -31,6 +31,9 @@ esac
 echo ">> 安装 mihomo-cli (linux/$ARCH2)"
 URL="https://github.com/${REPO}/releases/latest/download/mihomo-cli_linux_${ARCH2}.tar.gz"
 
+# 依次尝试: 直连 -> 常用镜像站 (可用 MIRROR=... 覆盖)
+MIRRORS=("$MIRROR" "https://ghfast.top" "https://gh-proxy.com" "https://mirror.ghproxy.com")
+
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 if [ -n "$PROXY" ]; then
@@ -38,18 +41,20 @@ if [ -n "$PROXY" ]; then
   echo ">> 使用代理: $PROXY"
 fi
 
-download() {
-  local i
-  for i in 1 2 3; do
-    curl -fsSL --retry 2 -o "$2" "$1" && return 0
-    echo ">> 重试 ($i/3) ..."
-    sleep 2
+try_download() {
+  local u
+  for u in "$URL" "${MIRRORS[@]}"; do
+    [ -z "$u" ] && continue
+    echo ">> 下载: $u"
+    if curl -fsSL --retry 2 --connect-timeout 15 -o "$TMP/mihomo-cli.tar.gz" "$u"; then
+      return 0
+    fi
   done
   return 1
 }
 
-if ! download "$URL" "$TMP/mihomo-cli.tar.gz"; then
-  echo "<< 下载失败, 请检查网络或手动下载: $URL"; exit 1
+if ! try_download; then
+  echo "<< 下载失败, 请检查网络/镜像 (MIRROR=https://... bash install.sh)"; exit 1
 fi
 tar xzf "$TMP/mihomo-cli.tar.gz" -C "$TMP"
 

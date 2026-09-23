@@ -60,6 +60,23 @@ func (c *Client) GetJSON(path string, out any) error {
 	return json.NewDecoder(resp.Body).Decode(out)
 }
 
+// GetJSONStruct 同 GetJSON (别名, 语义化导出)
+func (c *Client) GetJSONStruct(path string, out any) error { return c.GetJSON(path, out) }
+
+// PatchConfig 热更新部分内核配置 (如 log-level)
+func (c *Client) PatchConfig(body map[string]any) error {
+	resp, err := c.do("PATCH", "/configs", body)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 204 && resp.StatusCode != 200 {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return fmt.Errorf("%s %d: %s", i18n.T("警告: 热重载失败"), resp.StatusCode, string(b))
+	}
+	return nil
+}
+
 // Proxy 单个代理(节点或分组)
 type Proxy struct {
 	Name string `json:"name"`

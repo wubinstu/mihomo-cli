@@ -2,7 +2,9 @@ package render
 
 import (
 	"fmt"
+	"net"
 	"os"
+	"strings"
 
 	"github.com/wubinstu/mihomo-cli/internal/app"
 	"github.com/wubinstu/mihomo-cli/internal/i18n"
@@ -98,8 +100,14 @@ func Generate(s *app.Settings) error {
 	if s.ProxyMode != "" {
 		cfg["mode"] = s.ProxyMode
 	}
+	if s.IPV6Enabled {
+		cfg["ipv6"] = true
+	}
+	if s.LogLevel != "" {
+		cfg["log-level"] = s.LogLevel
+	}
 	// 用户规则优先: 置于订阅规则之前 (mihomo 首条匹配即生效)
-	if len(s.UserRules) > 0 {
+	if enabled := s.EnabledRules(); len(enabled) > 0 {
 		subRules := []string{}
 		if raw, ok := cfg["rules"].([]any); ok {
 			for _, r := range raw {
@@ -108,10 +116,10 @@ func Generate(s *app.Settings) error {
 				}
 			}
 		}
-		merged := append(append([]string{}, s.UserRules...), subRules...)
+		merged := append(append([]string{}, enabled...), subRules...)
 		cfg["rules"] = merged
 	}
-	// 自定义 DNS: 覆盖 nameserver/default-nameserver (空则跟随订阅)
+	// 自定义 DNS: 覆盖 nameserver; default-nameserver 必须为纯 IP (内核要求), DoH 时用内置 IP
 	if len(s.DNSServers) > 0 {
 		dns, _ := cfg["dns"].(map[string]any)
 		if dns == nil {
@@ -119,7 +127,18 @@ func Generate(s *app.Settings) error {
 		}
 		dns["enable"] = true
 		dns["nameserver"] = s.DNSServers
-		dns["default-nameserver"] = s.DNSServers
+		defaultNS := []string{"223.5.5.5", "119.29.29.29"}
+		hasIP := false
+		for _, ns := range s.DNSServers {
+			if net.ParseIP(strings.Split(strings.Split(ns, "//")[len(strings.Split(ns, "//"))-1], ":")[0]) != nil && !strings.Contains(ns, "://") {
+				hasIP = true
+				break
+			}
+		}
+		if hasIP {
+			defaultNS = s.DNSServers
+		}
+		dns["default-nameserver"] = defaultNS
 		cfg["dns"] = dns
 	}
 

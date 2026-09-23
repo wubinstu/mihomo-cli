@@ -65,12 +65,12 @@ ExecStart=%s -d %s
 Restart=on-failure
 RestartSec=3
 LimitNOFILE=1048576
-StandardOutput=append:%s
-StandardError=inherit
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
-`, app.CoreBin, app.RuntimeDir, app.LogFile)
+`, app.CoreBin, app.RuntimeDir)
 }
 
 // InstallService 安装并 enable 主服务

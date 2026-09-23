@@ -52,21 +52,8 @@ var updateCmd = &cobra.Command{
 		defer os.RemoveAll(tmp)
 		tgz := filepath.Join(tmp, "pkg.tgz")
 
-		req, _ := http.NewRequest("GET", assetURL, nil)
-		req.Header.Set("User-Agent", "mihomo-cli")
-		resp, err := hc.Do(req)
-		if err != nil {
-			return fmt.Errorf("%s: %w", T("下载失败"), err)
-		}
-		if resp.StatusCode != 200 {
-			resp.Body.Close()
-			return fmt.Errorf("%s %d", T("下载失败"), resp.StatusCode)
-		}
-		f, _ := os.Create(tgz)
-		_, err = io.Copy(f, resp.Body)
-		resp.Body.Close()
-		f.Close()
-		if err != nil {
+		_ = hc
+		if err := core.FetchURL(assetURL, updProxy, mustSettings().InstallMirror, tgz); err != nil {
 			return err
 		}
 
