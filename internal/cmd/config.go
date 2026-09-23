@@ -109,23 +109,34 @@ var configGetCmd = &cobra.Command{
 			}
 			return fmt.Errorf("%s %q", T("未知配置项"), args[0])
 		}
-		cat := ""
-		rows := [][]string{{"KEY", "VALUE"}}
-		flush := func() {
-			if len(rows) > 1 {
-				ui.Table(os.Stdout, rows, 3)
-			}
-		}
+		// 单表全局对齐: KEY/VALUE 列宽取全部条目最大值, 分组间空行+注释分隔
+		type row struct{ key, val, cat string }
+		var all []row
 		for _, e := range configKeys {
-			if e.cat != cat {
-				flush()
-				cat = e.cat
-				fmt.Printf("\n== %s ==\n", configCatName(cat))
-				rows = [][]string{{"KEY", "VALUE"}}
-			}
-			rows = append(rows, []string{e.key, configValue(s, e.key)})
+			all = append(all, row{e.key, configValue(s, e.key), e.cat})
 		}
-		flush()
+		kw, vw := 3, 5
+		for _, r := range all {
+			if w := ui.Width(r.key); w > kw {
+				kw = w
+			}
+			if w := ui.Width(r.val); w > vw {
+				vw = w
+			}
+		}
+		fmt.Printf("%-*s  %s\n", kw+2, "KEY", "VALUE")
+		fmt.Printf("%s  %s\n", strings.Repeat("-", kw), strings.Repeat("-", vw))
+		cat := ""
+		for i, r := range all {
+			if r.cat != cat {
+				cat = r.cat
+				if i > 0 {
+					fmt.Println()
+				}
+				fmt.Printf("# == %s ==\n", configCatName(cat))
+			}
+			fmt.Printf("%-*s  %s\n", kw+2, r.key, r.val)
+		}
 		return nil
 	},
 }
@@ -487,6 +498,18 @@ func init() {
 			return out, d
 		}
 		return configValueComp(cmd, args, toComplete)
+	}
+	configSyncCmd.ValidArgsFunction = func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		if len(args) == 0 {
+			var out []string
+			for _, m := range []string{"update-file", "update-service"} {
+				if strings.HasPrefix(m, toComplete) {
+					out = append(out, m)
+				}
+			}
+			return out, cobra.ShellCompDirectiveNoFileComp
+		}
+		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
 	configCmd.AddCommand(configGetCmd, configSetCmd, configResetCmd, configSyncCmd)
 	rootCmd.AddCommand(configCmd)

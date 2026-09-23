@@ -511,4 +511,8 @@ var en = map[string]string{
 	"配置管理: get/set/reset-default/sync":                                           "configuration: get/set/reset-default/sync",
 	"预览":                                                                         "preview",
 	"默认值":                                                                        "default",
+
+	// ---- v1.0.1 ----
+		"哔哩哔哩大陆": "Bilibili CN",
+		"哔哩哔哩港澳台": "Bilibili HK/MO/TW",
 }

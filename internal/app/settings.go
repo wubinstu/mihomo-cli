@@ -173,19 +173,106 @@ func (s *Settings) fixup() {
 	s.UserRules = valid
 }
 
-// Save 写回配置 (文件头带程序管理警告)
+// Save 写回配置: 分组 + 注释, 美观且程序可读
 func (s *Settings) Save() error {
 	if err := EnsureDirs(); err != nil {
 		return err
+	}
+	var b strings.Builder
+	w := func(format string, a ...any) { fmt.Fprintf(&b, format, a...) }
+
+	w("# ============================================================\n")
+	w("#  mihomo-cli 配置 (由程序管理, 请勿手动编辑)\n")
+	w("#    查看: mihomo-cli config get    修改: mihomo-cli config set <key> <value>\n")
+	w("#    手动改动后请执行: mihomo-cli config sync update-service\n")
+	w("# ============================================================\n")
+
+	w("\n# ---------- cli ----------\n")
+	w("cli_language = %s\n", tomlStr(orDefault(s.CLILanguage, "")))
+	w("current_profile = %s\n", tomlStr(s.CurrentProfile))
+	w("current_group = %s\n", tomlStr(s.CurrentGroup))
+	if s.InstallMirror != "" {
+		w("install_mirror = %s\n", tomlStr(s.InstallMirror))
+	}
+
+	w("\n# ---------- core (注入内核 config.yaml) ----------\n")
+	w("allow_lan = %v\n", s.AllowLan)
+	w("mixed_port = %d\n", s.MixedPort)
+	w("proxy_mode = %s\n", tomlStr(s.ProxyMode))
+	w("ipv6_enabled = %v\n", s.IPV6Enabled)
+	w("log_level = %s\n", tomlStr(s.LogLevel))
+	if len(s.DNSServers) > 0 {
+		w("dns_servers = [%s]\n", tomlArr(s.DNSServers))
+	}
+
+	w("\n# ---------- control api ----------\n")
+	w("api_base = %s\n", tomlStr(s.APIBase))
+	w("api_secret = %s\n", tomlStr(s.APISecret))
+
+	w("\n# ---------- timers (systemd) ----------\n")
+	w("sub_auto_update_enabled = %v\n", s.SubAutoUpdateEnabled)
+	w("sub_auto_update_interval = %s\n", tomlStr(s.SubAutoUpdateInterval.String()))
+	w("node_auto_select_enabled = %v\n", s.NodeAutoSelectEnabled)
+	w("node_auto_select_interval = %s\n", tomlStr(s.NodeAutoSelectInterval.String()))
+	if !s.AutoSelectLastRun.IsZero() {
+		w("auto_select_last_run = %s\n", s.AutoSelectLastRun.Format("2006-01-02T15:04:05Z07:00"))
+	}
+
+	w("\n# ---------- misc ----------\n")
+	w("test_url = %s\n", tomlStr(s.TestURL))
+	w("test_timeout_ms = %d\n", s.TestTimeout)
+
+	if len(s.UserRules) > 0 {
+		w("\n# ---------- user rules (优先于订阅规则) ----------\n")
+		for _, r := range s.UserRules {
+			w("[[user_rules]]\n")
+			w("type = %s\n", tomlStr(r.Type))
+			w("condition = %s\n", tomlStr(r.Condition))
+			w("strategy = %s\n", tomlStr(r.Strategy))
+			if r.NoResolve {
+				w("no_resolve = true\n")
+			}
+			w("enabled = %v\n\n", r.Enabled)
+		}
+	}
+
+	if len(s.Profiles) > 0 {
+		w("# ---------- profiles (订阅) ----------\n")
+		for _, p := range s.Profiles {
+			w("[[profiles]]\n")
+			w("name = %s\n", tomlStr(p.Name))
+			w("url = %s\n", tomlStr(p.URL))
+			w("updated_at = %s\n", p.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"))
+			w("nodes = %d\n", p.Nodes)
+			if p.UserInfo != "" {
+				w("userinfo = %s\n", tomlStr(p.UserInfo))
+			}
+			w("\n")
+		}
 	}
 	f, err := os.OpenFile(SettingsFile, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
-	fmt.Fprintf(f, "# %s\n# %s\n", "Managed by mihomo-cli - DO NOT EDIT MANUALLY", "use: mihomo-cli config get/set")
-	return toml.NewEncoder(f).Encode(s)
+	_, err = f.WriteString(b.String())
+	return err
 }
+
+func tomlStr(s string) string {
+	q := fmt.Sprintf("%q", s)
+	return q
+}
+
+func tomlArr(items []string) string {
+	var ps []string
+	for _, it := range items {
+		ps = append(ps, tomlStr(it))
+	}
+	return strings.Join(ps, ", ")
+}
+
+func orDefault(s, d string) string { return s }
 
 func (s *Settings) FindProfile(name string) *Profile {
 	for i := range s.Profiles {

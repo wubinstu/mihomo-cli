@@ -198,7 +198,7 @@ var coreRollbackCmd = &cobra.Command{
 
 // ---- version ----
 
-var Version = "1.0.0"
+var Version = "1.0.1"
 
 var versionCmd = &cobra.Command{
 	Use: "version",

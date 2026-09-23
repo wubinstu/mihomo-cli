@@ -5,10 +5,13 @@ set -euo pipefail
 
 REPO="wubinstu/mihomo-cli"
 PROXY="${PROXY:-}"
+MIRROR="${MIRROR:-}"
 while [ $# -gt 0 ]; do
   case "$1" in
     --proxy) PROXY="$2"; shift 2;;
     --proxy=*) PROXY="${1#--proxy=}"; shift;;
+    --mirror) MIRROR="$2"; shift 2;;
+    --mirror=*) MIRROR="${1#--mirror=}"; shift;;
     *) echo "未知参数: $1"; shift;;
   esac
 done

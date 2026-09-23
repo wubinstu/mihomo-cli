@@ -18,12 +18,14 @@
 ## 快速开始
 
 ```bash
+# 1) 安装 CLI 本体 (脚本自动 sudo; 大陆网络可指定镜像)
 curl -fsSL https://raw.githubusercontent.com/wubinstu/mihomo-cli/main/install.sh | sudo bash
-# 或指定镜像: MIRROR=https://ghfast.top bash install.sh (以上命令前加 sudo)
+#   或: curl -fsSL .../install.sh | sudo bash -s -- --mirror https://ghfast.top
 
-sudo mihomo-cli init            # 粘贴订阅链接
-sudo mihomo-cli start
-mihomo-cli doctor
+sudo mihomo-cli install      # 2) 下载内核 + 注册 systemd 服务 + geo 数据 + 补全
+sudo mihomo-cli init         # 3) 粘贴订阅链接
+sudo mihomo-cli start        # 4) 启动代理服务
+mihomo-cli doctor            # 体检
 ```
 
 ## 三层结构
@@ -88,6 +90,9 @@ mihomo-cli rule enable 1 / disable 1 / rm 1
 ```bash
 install.sh (自动 sudo/镜像) / deb / rpm (Releases) / sudo mihomo-cli update
 ```
+
+镜像: `install.sh --mirror <url>` (管道形式 `sudo bash -s -- --mirror <url>`)；
+CLI 内下载内核/geo/自更新走 镜像自动尝试链，可用 `config set install-mirror <url>` 固定。
 
 ## License
 

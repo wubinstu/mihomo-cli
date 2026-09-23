@@ -504,6 +504,20 @@ func init() {
 		return out, cobra.ShellCompDirectiveNoFileComp
 	})
 
+	for _, c := range []*cobra.Command{ruleListCmd, ruleCmd} {
+		c.RegisterFlagCompletionFunc("type", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+			var out []string
+			for _, rt := range ruleTypes {
+				if strings.HasPrefix(rt.Name, toComplete) {
+					out = append(out, rt.Name)
+				}
+			}
+			return out, cobra.ShellCompDirectiveNoFileComp
+		})
+		c.RegisterFlagCompletionFunc("strategy", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+			return []string{"DIRECT", "REJECT", "REJECT-DROP", "PASS"}, cobra.ShellCompDirectiveNoFileComp
+		})
+	}
 	ruleCmd.AddCommand(ruleListCmd, ruleAddCmd, ruleRmCmd, ruleEnableCmd, ruleDisableCmd)
 	rootCmd.AddCommand(ruleCmd)
 }

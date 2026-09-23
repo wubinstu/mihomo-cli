@@ -31,8 +31,8 @@ var pingSites = []pingSite{
 	{"Apple", "https://www.apple.com", nil},
 	{"Google", "https://www.google.com/generate_204", nil},
 	{"YouTube", "https://www.youtube.com/generate_204", nil},
-	{"哔哩哔哩大陆", "https://www.bilibili.com", nil},
-	{"哔哩哔哩港澳台", "https://www.bilibili.com", func(code int) string {
+	{T("哔哩哔哩大陆"), "https://www.bilibili.com", nil},
+	{T("哔哩哔哩港澳台"), "https://www.bilibili.com", func(code int) string {
 		if code == 200 {
 			return "unverified"
 		}
@@ -121,19 +121,23 @@ var pingCmd = &cobra.Command{
 
 		rows := [][]string{{T("站点"), "HTTP", T("延迟"), T("状态")}}
 		for _, r := range results {
-			status, delay := T("超时"), ui.ColorDelay(-1)
+			status, delay, color := T("超时"), ui.ColorDelay(-1), "\x1b[90m"
 			switch {
 			case r.err != "":
 			case r.code == 403 || r.code == 451:
 				status = T("受限")
 				delay = ui.ColorDelay(4000)
+				color = "\x1b[31m"
 			case r.code >= 200 && r.code < 400:
 				status = T("可用")
 				delay = ui.ColorDelay(int(r.ms))
+				color = "\x1b[32m"
 			default:
 				status = fmt.Sprintf("HTTP %d", r.code)
 				delay = ui.ColorDelay(3200)
+				color = "\x1b[33m"
 			}
+			status = color + status + ui.ColorReset
 			rows = append(rows, []string{r.name, itoa(r.code), delay, status})
 		}
 		ui.Table(os.Stdout, rows, 2)
