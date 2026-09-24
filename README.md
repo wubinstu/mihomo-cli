@@ -18,15 +18,19 @@
 ## 快速开始
 
 ```bash
-# 1) 安装 CLI 本体 (脚本自动 sudo; 大陆网络可指定镜像)
+# 1) 安装 CLI 本体 (install.sh 只装二进制到 /usr/bin; 大陆网络可指定镜像)
 curl -fsSL https://raw.githubusercontent.com/wubinstu/mihomo-cli/main/install.sh | sudo bash
-#   或: curl -fsSL .../install.sh | sudo bash -s -- --mirror https://ghfast.top
+#   或: ... | sudo bash -s -- --mirror https://ghfast.top
 
-sudo mihomo-cli install      # 2) 下载内核 + 注册 systemd 服务 + geo 数据 + 补全
-sudo mihomo-cli init         # 3) 粘贴订阅链接
-sudo mihomo-cli start        # 4) 启动代理服务
-mihomo-cli doctor            # 体检
+# 2) 全新安装 (可组合; 结束时自动拉起服务, 无订阅则为最小配置全 DIRECT)
+sudo mihomo-cli install --core latest --resource all --systemd --completion bash
+
+sudo mihomo-cli sub add mysub <订阅URL>   # 3) 添加订阅 (第一个自动激活)
+mihomo-cli doctor
 ```
+
+install 幂等且各司其职: `--core latest|compatible`、`--resource mmdb|asn|geoip|geosite|all`、
+`--systemd` (按 config.toml 重生成单元)、`--completion bash|zsh|fish`; 订阅用 `sub add`, 参数用 `config set`。
 
 ## 三层结构
 
@@ -78,7 +82,7 @@ mihomo-cli rule enable 1 / disable 1 / rm 1
 
 | 类别 | key | 默认 |
 |---|---|---|
-| 内核 | `allow-lan` `mixed-port` `proxy-mode` `ipv6-enabled` `log-level` `tcp-concurrent` `unified-delay` `keep-alive-interval` | false / 7890 / 跟随订阅 / false / info / 跟随 / 跟随 / 跟随 |
+| 内核 | `allow-lan` `mixed-port` `socks-port` `http-port` `proxy-mode` `ipv6-enabled` `log-level` `tcp-concurrent` `unified-delay` `keep-alive-interval` | false / 7890 / 未设置 / 未设置 / rule / false / info / (sub:…) / (sub:…) / (sub:…) |
 | cli | `cli-language` / `install-mirror` / `test-url` / `test-timeout` | locale / 自动 / gstatic / 5000 |
 | 定时器 | `sub-auto-update-*` / `node-auto-select-*` / `resource-auto-update-*` | true 24h / false 30m / false 24h |
 

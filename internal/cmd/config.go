@@ -15,6 +15,7 @@ import (
 	"github.com/wubinstu/mihomo-cli/internal/app"
 	"github.com/wubinstu/mihomo-cli/internal/i18n"
 	"github.com/wubinstu/mihomo-cli/internal/render"
+	"github.com/wubinstu/mihomo-cli/internal/subs"
 	"github.com/wubinstu/mihomo-cli/internal/sysd"
 	"github.com/wubinstu/mihomo-cli/internal/ui"
 )
@@ -34,17 +35,17 @@ type cfgEntry struct{ cat, key string }
 // configKeys 分类键表 (get 展示 / set 校验 / 补全)
 // configDefaults 有默认值的配置项
 var configDefaults = map[string]string{
-	"allow-lan": "false", "mixed-port": "7890", "proxy-mode": "rule",
-	"ipv6-enabled": "false", "log-level": "info",
+	"allow-lan": "false", "mixed-port": "7890", "socks-port": "/", "http-port": "/",
+	"proxy-mode": "rule", "ipv6-enabled": "false", "log-level": "info",
 	"cli-language": "auto", "github-mirror": "auto",
-	"test-url": "gstatic-204", "test-timeout": "5000ms",
+	"test-url": "https://www.gstatic.com/generate_204", "test-timeout": "5000ms",
 	"sub-auto-update-enabled": "true", "sub-auto-update-interval": "24h",
 	"node-auto-select-enabled": "false", "node-auto-select-interval": "30m",
 	"resource-auto-update-enabled": "false", "resource-auto-update-interval": "24h",
 }
 
 var configKeys = []cfgEntry{
-	{"core", "allow-lan"}, {"core", "mixed-port"}, {"core", "proxy-mode"},
+	{"core", "allow-lan"}, {"core", "mixed-port"}, {"core", "socks-port"}, {"core", "http-port"}, {"core", "proxy-mode"},
 	{"core", "ipv6-enabled"}, {"core", "log-level"},
 	{"core", "tcp-concurrent"}, {"core", "unified-delay"}, {"core", "keep-alive-interval"},
 	{"cli", "cli-language"}, {"cli", "github-mirror"},
@@ -61,6 +62,10 @@ func configValue(s *app.Settings, key string) string {
 		return fmt.Sprintf("%v", s.AllowLan)
 	case "mixed-port":
 		return fmt.Sprintf("%d", s.MixedPort)
+	case "socks-port":
+		return portOrUnset(s.SocksPort)
+	case "http-port":
+		return portOrUnset(s.HTTPPort)
 	case "proxy-mode":
 		if s.ProxyMode == "" {
 			return "rule (sub default)"
@@ -120,6 +125,31 @@ func triBool(p *bool) string {
 	return fmt.Sprintf("%v", *p)
 }
 
+func portOrUnset(n int) string {
+	if n == 0 {
+		return T("未设置")
+	}
+	return fmt.Sprintf("%d", n)
+}
+
+// subParamDefault 从订阅原文读取参数默认值: "(sub: true)" / "(sub: none)"
+func subParamDefault(key string, kind string) string {
+	v := subYAMLKey(key)
+	switch kind {
+	case "bool":
+		if v == "" {
+			return "(sub: none)"
+		}
+		return "(sub: " + v + ")"
+	case "int":
+		if v == "" {
+			return "(sub: none)"
+		}
+		return "(sub: " + v + ")"
+	}
+	return "(sub: none)"
+}
+
 func orDash2(s string) string {
 	if s == "" {
 		return "-"
@@ -142,27 +172,54 @@ var configGetCmd = &cobra.Command{
 			}
 			return fmt.Errorf("%s %q", T("未知配置项"), args[0])
 		}
-		// 每类一张表 (各自对齐), 含 DEFAULT 列
+		// 每类一张表, 三列宽度跨表统一对齐
 		cat := ""
-		var rows [][]string
-		flush := func() {
-			if len(rows) > 1 {
-				ui.Table(os.Stdout, rows, 2)
-			}
-		}
+		type r3 struct{ k, v, d string }
+		var all []r3
 		for _, e := range configKeys {
-			if e.cat != cat {
-				flush()
-				cat = e.cat
-				rows = [][]string{{"KEY (" + configCatName(cat) + ")", "VALUE", "DEFAULT"}}
-			}
 			def := configDefaults[e.key]
+			switch e.key {
+			case "tcp-concurrent", "unified-delay":
+				def = subParamDefault(e.key, "bool")
+			case "keep-alive-interval":
+				def = subParamDefault(e.key, "int")
+			}
 			if def == "" {
 				def = "/"
 			}
-			rows = append(rows, []string{e.key, configValue(s, e.key), def})
+			all = append(all, r3{e.key, configValue(s, e.key), def})
 		}
-		flush()
+		kw, vw, dw := 3, 5, 7
+		for _, r := range all {
+			for i, w := range []int{ui.Width(r.k), ui.Width(r.v), ui.Width(r.d)} {
+				switch i {
+				case 0:
+					if w > kw {
+						kw = w
+					}
+				case 1:
+					if w > vw {
+						vw = w
+					}
+				default:
+					if w > dw {
+						dw = w
+					}
+				}
+			}
+		}
+		for i, e := range configKeys {
+			if e.cat != cat {
+				cat = e.cat
+				if i > 0 {
+					fmt.Println()
+				}
+				fmt.Printf("%-*s  %-*s  %s\n", kw, "KEY ("+configCatName(cat)+")", vw, "VALUE", "DEFAULT")
+				fmt.Printf("%s  %s  %s\n", strings.Repeat("-", kw), strings.Repeat("-", vw), strings.Repeat("-", dw))
+			}
+			r := all[i]
+			fmt.Printf("%-*s  %-*s  %s\n", kw, r.k, vw, r.v, r.d)
+		}
 		return nil
 	},
 }
@@ -170,11 +227,11 @@ var configGetCmd = &cobra.Command{
 func configCatName(c string) string {
 	switch c {
 	case "core":
-		return T("内核 (config.yaml)")
+		return "core config"
 	case "cli":
-		return T("cli 自身")
+		return "cli"
 	case "timer":
-		return T("定时任务 (systemd)")
+		return "systemd timers"
 	}
 	return c
 }
@@ -222,19 +279,33 @@ resource-auto-update-interval <dur>       ` + T("资源更新周期") + ", " + T
 		}
 		switch k {
 		case "cli-language":
-			if v != "zh" && v != "en" {
-				return fmt.Errorf("%s", T("cli-language 仅支持 zh / en"))
+			if v == "auto" {
+				s.CLILanguage = ""
+				v = "auto"
+			} else if v != "zh" && v != "en" {
+				return fmt.Errorf("%s: auto|zh|en", T("无效值"))
+			} else {
+				s.CLILanguage = v
+				i18n.Set(v)
 			}
-			s.CLILanguage = v
-			i18n.Set(v)
 		case "allow-lan":
 			s.AllowLan = b()
-		case "mixed-port":
+		case "mixed-port", "socks-port", "http-port":
+			if v == "none" || v == "-" {
+				v = "0"
+			}
 			n, err := strconv.Atoi(v)
-			if err != nil || n < 1 || n > 65535 {
+			if err != nil || n < 0 || n > 65535 {
 				return fmt.Errorf("%s", T("无效端口"))
 			}
-			s.MixedPort = n
+			switch k {
+			case "mixed-port":
+				s.MixedPort = n
+			case "socks-port":
+				s.SocksPort = n
+			case "http-port":
+				s.HTTPPort = n
+			}
 		case "proxy-mode":
 			if v != "rule" && v != "global" && v != "direct" {
 				return fmt.Errorf("%s", T("proxy-mode 仅支持 rule / global / direct"))
@@ -250,7 +321,12 @@ resource-auto-update-interval <dur>       ` + T("资源更新周期") + ", " + T
 			}
 			s.LogLevel = v
 		case "github-mirror":
-			s.GithubMirror = v
+			if v == "auto" {
+				s.GithubMirror = ""
+				v = "auto"
+			} else {
+				s.GithubMirror = v
+			}
 		case "tcp-concurrent":
 			bv := b()
 			s.TCPConcurrent = &bv
@@ -479,7 +555,7 @@ mihomo-cli config sync update-service [key...] # ` + T("用配置文件覆盖服
 		// 三列对比: 文件 / 运行 / 结果(绿同红异)
 		rows := [][]string{{"KEY", T("配置文件"), T("内核运行"), T("比对")}}
 		same, diff := 0, 0
-		for _, k := range []string{"proxy-mode", "mixed-port", "allow-lan", "ipv6-enabled", "log-level"} {
+		for _, k := range []string{"proxy-mode", "mixed-port", "socks-port", "http-port", "allow-lan", "ipv6-enabled", "log-level", "tcp-concurrent", "unified-delay", "keep-alive-interval"} {
 			fv, lv := fileVals[k], live[k]
 			mark := "\x1b[32m" + T("一致") + "\x1b[0m"
 			if fv != lv {
@@ -491,6 +567,25 @@ mihomo-cli config sync update-service [key...] # ` + T("用配置文件覆盖服
 			rows = append(rows, []string{k, fv, lv, mark})
 		}
 		ui.Table(os.Stdout, rows, 2)
+		// timers: 文件设置 vs systemd 实际状态
+		fmt.Println()
+		trows := [][]string{{"KEY", T("配置文件"), "systemd", T("比对")}}
+		for _, t := range []struct{ key, unit string; want bool }{
+			{"sub-auto-update-enabled", "mihomo-cli-sub.timer", s.SubAutoUpdateEnabled},
+			{"node-auto-select-enabled", "mihomo-cli-auto.timer", s.NodeAutoSelectEnabled},
+			{"resource-auto-update-enabled", "mihomo-cli-resource.timer", s.ResourceAutoUpdateEnabled},
+		} {
+			got := sysd.TimerEnabled(t.unit)
+			mark := "\x1b[32m" + T("一致") + "\x1b[0m"
+			if got != t.want {
+				mark = "\x1b[31m" + T("不同") + "\x1b[0m"
+				diff++
+			} else {
+				same++
+			}
+			trows = append(trows, []string{t.key, fmt.Sprintf("%v", t.want), fmt.Sprintf("%v", got), mark})
+		}
+		ui.Table(os.Stdout, trows, 2)
 		if diff > 0 {
 			fmt.Println(T("提示: config sync update-service 以文件覆盖服务; config sync update-file 以运行状态覆盖文件"))
 		}
@@ -502,11 +597,16 @@ mihomo-cli config sync update-service [key...] # ` + T("用配置文件覆盖服
 // liveCoreConfig 读取内核运行配置关键字段
 func liveCoreConfig(s *app.Settings) map[string]string {
 	var live struct {
-		Mode      string `json:"mode"`
-		MixedPort int    `json:"mixed-port"`
-		AllowLan  bool   `json:"allow-lan"`
-		IPV6      bool   `json:"ipv6"`
-		LogLevel  string `json:"log-level"`
+		Mode          string `json:"mode"`
+		MixedPort     int    `json:"mixed-port"`
+		SocksPort     int    `json:"socks-port"`
+		HTTPPort      int    `json:"port"`
+		AllowLan      bool   `json:"allow-lan"`
+		IPV6          bool   `json:"ipv6"`
+		LogLevel      string `json:"log-level"`
+		TCPConcurrent bool   `json:"tcp-concurrent"`
+		UnifiedDelay  bool   `json:"unified-delay"`
+		KeepAlive     int    `json:"keep-alive-interval"`
 	}
 	m := map[string]string{}
 	if err := api.New(s).GetJSONStruct("/configs", &live); err != nil {
@@ -514,9 +614,14 @@ func liveCoreConfig(s *app.Settings) map[string]string {
 	}
 	m["proxy-mode"] = live.Mode
 	m["mixed-port"] = strconv.Itoa(live.MixedPort)
+	m["socks-port"] = strconv.Itoa(live.SocksPort)
+	m["http-port"] = strconv.Itoa(live.HTTPPort)
 	m["allow-lan"] = fmt.Sprintf("%v", live.AllowLan)
 	m["ipv6-enabled"] = fmt.Sprintf("%v", live.IPV6)
 	m["log-level"] = live.LogLevel
+	m["tcp-concurrent"] = fmt.Sprintf("%v", live.TCPConcurrent)
+	m["unified-delay"] = fmt.Sprintf("%v", live.UnifiedDelay)
+	m["keep-alive-interval"] = strconv.Itoa(live.KeepAlive)
 	return m
 }
 
@@ -533,13 +638,51 @@ func syncFileValues(s *app.Settings) map[string]string {
 	if level == "" {
 		level = "info"
 	}
-	return map[string]string{
-		"proxy-mode":    mode,
-		"mixed-port":    strconv.Itoa(s.MixedPort),
-		"allow-lan":     fmt.Sprintf("%v", s.AllowLan),
-		"ipv6-enabled":  fmt.Sprintf("%v", s.IPV6Enabled),
-		"log-level":     level,
+	tri := func(p *bool) string {
+		if p == nil {
+			return ""
+		}
+		return fmt.Sprintf("%v", *p)
 	}
+	kai := ""
+	if s.KeepAliveInterval != nil {
+		kai = strconv.Itoa(*s.KeepAliveInterval)
+	}
+	port := func(n int) string {
+		if n == 0 {
+			return "0"
+		}
+		return strconv.Itoa(n)
+	}
+	return map[string]string{
+		"proxy-mode":         mode,
+		"mixed-port":         strconv.Itoa(s.MixedPort),
+		"socks-port":         port(s.SocksPort),
+		"http-port":          port(s.HTTPPort),
+		"allow-lan":          fmt.Sprintf("%v", s.AllowLan),
+		"ipv6-enabled":       fmt.Sprintf("%v", s.IPV6Enabled),
+		"log-level":          level,
+		"tcp-concurrent":     tri(s.TCPConcurrent),
+		"unified-delay":      tri(s.UnifiedDelay),
+		"keep-alive-interval": kai,
+	}
+}
+
+// subYAMLKey 读当前订阅原文 yaml 顶层键
+func subYAMLKey(key string) string {
+	s := mustSettings()
+	p := s.Current()
+	if p == nil {
+		return ""
+	}
+	data, err := os.ReadFile(subs.Path(p.Name))
+	if err != nil {
+		return ""
+	}
+	var m map[string]any
+	_ = yaml.Unmarshal(data, &m)
+	v, _ := m[key].(string)
+	return v
 }
 
 // runtimeYAMLKey 读 runtime/config.yaml 顶层键
@@ -573,7 +716,7 @@ func configValueComp(cmd *cobra.Command, args []string, toComplete string) ([]st
 	if len(args) == 1 {
 		switch args[0] {
 		case "cli-language":
-			return []string{"zh", "en"}, cobra.ShellCompDirectiveNoFileComp
+			return []string{"auto", "zh", "en"}, cobra.ShellCompDirectiveNoFileComp
 		case "allow-lan", "ipv6-enabled", "sub-auto-update-enabled", "node-auto-select-enabled":
 			return []string{"true", "false"}, cobra.ShellCompDirectiveNoFileComp
 		case "proxy-mode":

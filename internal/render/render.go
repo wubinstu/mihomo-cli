@@ -90,8 +90,16 @@ func Generate(s *app.Settings) error {
 	cfg["secret"] = s.APISecret
 	cfg["log-level"] = "info"
 	cfg["mixed-port"] = s.MixedPort
-	delete(cfg, "port")
-	delete(cfg, "socks-port")
+	if s.SocksPort > 0 {
+		cfg["socks-port"] = s.SocksPort
+	} else {
+		delete(cfg, "socks-port")
+	}
+	if s.HTTPPort > 0 {
+		cfg["port"] = s.HTTPPort
+	} else {
+		delete(cfg, "port")
+	}
 	delete(cfg, "redir-port")
 	cfg["allow-lan"] = s.AllowLan
 	if s.AllowLan {

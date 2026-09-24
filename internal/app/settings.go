@@ -53,6 +53,8 @@ type Settings struct {
 	// ---- 内核 config.yaml (render 注入) ----
 	AllowLan    bool     `toml:"allow_lan"`
 	MixedPort   int      `toml:"mixed_port"`
+	SocksPort   int      `toml:"socks_port,omitempty"` // 0=未设置
+	HTTPPort    int      `toml:"http_port,omitempty"`  // 0=未设置
 	ProxyMode   string   `toml:"proxy_mode"` // rule/global/direct; 空则跟随订阅
 	IPV6Enabled bool     `toml:"ipv6_enabled,omitempty"`
 	LogLevel    string   `toml:"log_level,omitempty"` // debug/info/warning/error/silent
@@ -212,6 +214,12 @@ func (s *Settings) Save() error {
 	w("\n# ---------- core (注入内核 config.yaml) ----------\n")
 	w("allow_lan = %v\n", s.AllowLan)
 	w("mixed_port = %d\n", s.MixedPort)
+	if s.SocksPort > 0 {
+		w("socks_port = %d\n", s.SocksPort)
+	}
+	if s.HTTPPort > 0 {
+		w("http_port = %d\n", s.HTTPPort)
+	}
 	w("proxy_mode = %s\n", tomlStr(s.ProxyMode))
 	w("ipv6_enabled = %v\n", s.IPV6Enabled)
 	w("log_level = %s\n", tomlStr(s.LogLevel))

@@ -47,15 +47,20 @@ var subAddCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		s := mustSettings()
-		if err := subs.Add(s, args[0], args[1], ""); err != nil {
+		first := s.Current() == nil // 仅第一个订阅自动激活
+		if err := subs.Add2(s, args[0], args[1], "", first); err != nil {
 			return err
 		}
-		fmt.Printf("%s [%s] %s\n", T("订阅"), subs.Sanitize(args[0]), T("已添加并生效"))
-		if err := render.Generate(s); err != nil {
-			return err
+		if first {
+			fmt.Printf("%s [%s] %s\n", T("订阅"), subs.Sanitize(args[0]), T("已添加并生效"))
+			if err := render.Generate(s); err != nil {
+				return err
+			}
+			reloadIfActive(s)
+			printChain()
+		} else {
+			fmt.Printf("%s [%s] %s\n", T("订阅"), subs.Sanitize(args[0]), T("已添加")+" ("+T("当前订阅不变, 如需切换")+": sub use)")
 		}
-		reloadIfActive(s)
-		printChain()
 		return nil
 	},
 }

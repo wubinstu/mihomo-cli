@@ -17,7 +17,6 @@ import (
 	"github.com/wubinstu/mihomo-cli/internal/app"
 	"github.com/wubinstu/mihomo-cli/internal/core"
 	"github.com/wubinstu/mihomo-cli/internal/render"
-	"github.com/wubinstu/mihomo-cli/internal/subs"
 	"github.com/wubinstu/mihomo-cli/internal/sysd"
 )
 
@@ -34,90 +33,128 @@ func reloadIfActive(s *app.Settings) {
 	}
 }
 
-var installProxy string
-var installSub string
-var installCompatible bool
-var installAllowLan bool
-var installCompletion string
+var (
+	installProxy       string
+	installMirrorFlag  string
+	installCore        string
+	installResource    string
+	installSystemd     bool
+	installCompletionS string
+)
 
+// installCmd 安装器: 只负责下载/写入 (幂等); 订阅用 sub add, 参数用 config set
 var installCmd = &cobra.Command{
 	Use:   "install",
-	Short: T("安装 mihomo 内核并注册 systemd 服务"),
+	Short: T("安装: --core / --resource / --systemd / --completion (可组合; 无参数显示帮助)"),
+	Long: T("安装动作幂等: 文件不存在则下载创建, 存在则更新刷新。订阅请用 sub add, 参数请用 config set。") + `
+
+mihomo-cli install --core latest --resource all --systemd --completion bash   # ` + T("全新安装") + `
+mihomo-cli install --core compatible    # ` + T("安装旧 CPU 兼容内核") + `
+mihomo-cli install --resource mmdb      # ` + T("安装/更新单个资源 (mmdb/asn/geoip/geosite/all)") + `
+mihomo-cli install --systemd            # ` + T("按 config.toml 重新生成全部 systemd 单元并 daemon-reload") + `
+mihomo-cli install --completion bash    # ` + T("安装/更新 shell 补全 (bash/zsh/fish, 空=交互)") + `
+mihomo-cli install [--proxy URL] [--mirror URL]   # ` + T("一次性下载代理/镜像 (默认失败时自动尝试内置镜像)") + `
+
+` + T("结束时若内核与 systemd 就绪而服务未运行, 将以最小配置自动拉起服务。"),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if os.Geteuid() != 0 {
 			return fmt.Errorf("%s (sudo mihomo-cli install)", T("安装需要 root 权限: 配置目录 /etc/mihomo-cli 与 systemd 单元"))
+		}
+		noFlags := installCore == "" && installResource == "" && !installSystemd && installCompletionS == ""
+		if noFlags {
+			return cmd.Help()
 		}
 		s, err := app.LoadSettings()
 		if err != nil {
 			return err
 		}
-		if installAllowLan {
-			s.AllowLan = true
-		}
 		if err := app.EnsureDirs(); err != nil {
 			return err
 		}
-
-		// 1. 内核
-		if _, err := os.Stat(app.CoreBin); os.IsNotExist(err) {
-			rel, err := core.Latest(installProxy)
-			if err != nil {
-				return err
-			}
-			fmt.Printf("%s: %s (arch=%s)\n", T("最新内核版本"), rel.TagName, core.ArchName())
-			if err := core.DownloadInstall(rel.TagName, installProxy, s.GithubMirror, installCompatible); err != nil {
-				return err
-			}
-		} else {
-			v, _ := core.Version()
-			fmt.Printf("%s: %s\n", T("内核已安装"), v)
-		}
-		if err := s.Save(); err != nil {
+		if err := s.Save(); err != nil { // 无 config.toml 时按默认值创建
 			return err
 		}
-
-		// 2. geo 数据预下载 (避免内核首次启动直连 GitHub 下载 MMDB 失败导致 fatal 循环)
-		fmt.Println(T("预下载 geo 数据 (geoip/geosite) ..."))
-		if err := core.DownloadGeo(installProxy, s.GithubMirror); err != nil {
-			fmt.Fprintf(os.Stderr, "%s: %v\n", T("警告: geo 数据下载失败"), err)
+		mirror := installMirrorFlag
+		if mirror == "" {
+			mirror = s.GithubMirror
 		}
+		any := false
 
-		// 3. systemd 服务
-		fmt.Println(T("注册 systemd 服务 ..."))
-		if err := sysd.InstallService(); err != nil {
-			return err
-		}
-
-		// 4. 订阅
-		if installSub != "" {
-			if err := subs.Add(s, "default", installSub, installProxy); err != nil {
-				return fmt.Errorf("%s: %w", T("添加订阅失败"), err)
+		// --core latest|compatible
+		if installCore != "" {
+			compatible := installCore == "compatible"
+			if !compatible && installCore != "latest" {
+				return fmt.Errorf("--core: latest|compatible")
 			}
+			if _, err := os.Stat(app.CoreBin); os.IsNotExist(err) {
+				rel, err := core.Latest(installProxy)
+				if err != nil {
+					return err
+				}
+				fmt.Printf("%s: %s (arch=%s)\n", T("最新内核版本"), rel.TagName, core.ArchName())
+				if err := core.DownloadInstall(rel.TagName, installProxy, mirror, compatible); err != nil {
+					return err
+				}
+			} else {
+				if compatible {
+					rel, err := core.Latest(installProxy)
+					if err != nil {
+						return err
+					}
+					if err := core.DownloadInstall(rel.TagName, installProxy, mirror, true); err != nil {
+						return err
+					}
+				} else {
+					fmt.Println(T("内核已安装") + " (" + T("如需更新") + ": mihomo-cli resource core upgrade)")
+				}
+			}
+			any = true
 		}
-		if s.Current() != nil {
-			if err := render.Generate(s); err != nil {
+
+		// --resource <name|all>
+		if installResource != "" {
+			names := []string{installResource}
+			if installResource == "all" {
+				names = []string{"mmdb", "geosite", "asn", "geoip"}
+			}
+			for _, n := range names {
+				if err := core.UpdateResource(n, installProxy, mirror); err != nil {
+					return err
+				}
+			}
+			any = true
+		}
+
+		// --systemd: 重新生成全部单元
+		if installSystemd {
+			fmt.Println(T("注册 systemd 服务") + " ...")
+			if err := sysd.InstallService(); err != nil {
 				return err
 			}
-		}
-		if err := sysd.InstallTimers(s); err != nil {
-			fmt.Fprintf(os.Stderr, "%s: %v\n", T("警告: 定时任务安装失败"), err)
-		}
-		installCompletions(installCompletion)
-
-		// 配置目录属主交给发起安装的用户 (sudo 调用), 该用户后续无需 sudo 即可管理
-		if u := os.Getenv("SUDO_USER"); u != "" && u != "root" {
-			_ = exec.Command("chown", "-R", u+":", app.BaseDir).Run()
+			if err := sysd.InstallTimers(s); err != nil {
+				fmt.Fprintf(os.Stderr, "%s: %v\n", T("警告: 定时任务安装失败"), err)
+			}
+			any = true
 		}
 
-		fmt.Printf("\n%s\n", T("安装完成。后续步骤:"))
-		steps := []string{
-			"mihomo-cli init                # " + T("添加订阅"),
-			"mihomo-cli start               # " + T("启动代理服务"),
-			"eval $(mihomo-cli proxy on)    # " + T("当前 shell 开启代理"),
-			"mihomo-cli doctor              # " + T("体检: 内核/服务/端口/API/订阅/定时器"),
+		// --completion <shell|空=交互>
+		if cmd.Flags().Changed("completion") {
+			installCompletions(installCompletionS)
+			any = true
 		}
-		for _, l := range steps {
-			fmt.Println("  " + l)
+
+		_ = any
+		// 其他用户权限与属主一致 (任何用户可读写配置; 安全敏感环境请自行收紧)
+		_ = exec.Command("chmod", "-R", "o=rwX", app.BaseDir).Run()
+		// 结束检查: 内核+systemd 就绪则确保服务运行 (空配置即全 DIRECT)
+		if _, err := os.Stat(app.CoreBin); err == nil {
+			if _, err := os.Stat("/etc/systemd/system/mihomo-cli.service"); err == nil {
+				if err := render.Generate(s); err == nil && !sysd.IsActive() {
+					if err := sysd.Service("start"); err == nil {
+						fmt.Println(T("服务已自动拉起") + " (" + T("无订阅时为最小配置, 全部流量 DIRECT") + ")")
+					}
+				}
+			}
 		}
 		return nil
 	},
@@ -132,7 +169,7 @@ var uninstallCmd = &cobra.Command{
 		if os.Geteuid() != 0 {
 			return fmt.Errorf("%s (sudo mihomo-cli uninstall)", T("安装需要 root 权限: 配置目录 /etc/mihomo-cli 与 systemd 单元"))
 		}
-		fmt.Println(T("停止并移除 systemd 单元 ..."))
+		fmt.Println(T("停止并移除 systemd 单元") + " ...")
 		sysd.RemoveAll()
 		removeCompletions()
 		for _, bin := range []string{"/usr/bin/mihomo-cli", "/usr/local/bin/mihomo-cli"} {
@@ -150,34 +187,6 @@ var uninstallCmd = &cobra.Command{
 	},
 }
 
-var initCmd = &cobra.Command{
-	Use:   "init",
-	Short: T("交互式初始化: 添加第一个订阅并启用服务"),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		s, err := app.LoadSettings()
-		if err != nil {
-			return err
-		}
-		if s.Current() != nil {
-			fmt.Printf("%s %s\n", T("已有订阅"), s.Current().Name)
-		}
-		fmt.Print(T("请输入订阅链接 (clash 订阅 URL): "))
-		line, _ := readLine()
-		rawurl := strings.TrimSpace(line)
-		if rawurl == "" || !strings.Contains(rawurl, "://") {
-			return fmt.Errorf("%s", T("无效的订阅链接"))
-		}
-		if err := subs.Add(s, "default", rawurl, ""); err != nil {
-			return err
-		}
-		if err := render.Generate(s); err != nil {
-			return err
-		}
-		fmt.Printf("%s mihomo-cli start\n", T("订阅已就绪。启动服务:"))
-		return nil
-	},
-}
-
 var runCmd = &cobra.Command{
 	Use:   "run",
 	Short: T("前台运行内核(调试模式, Ctrl-C 退出)"),
@@ -187,12 +196,12 @@ var runCmd = &cobra.Command{
 			return err
 		}
 		if s.Current() == nil {
-			return fmt.Errorf("%s", T("没有订阅, 请先 mihomo-cli init"))
+			return fmt.Errorf("%s", T("没有订阅, 请先 mihomo-cli sub use <id|名称>"))
 		}
 		if err := render.Generate(s); err != nil {
 			return err
 		}
-		fmt.Println(T("前台启动内核, 日志输出到终端 ..."))
+		fmt.Println(T("前台启动内核, 日志输出到终端") + " ...")
 		return syscall.Exec(app.CoreBin, []string{app.CoreBin, "-d", app.RuntimeDir}, os.Environ())
 	},
 }
@@ -234,7 +243,7 @@ func installCompletions(shell string) {
 		// 交互选择
 		fmt.Println(T("请选择要安装补全的 shell:"))
 		for j, t := range targets {
-			fmt.Printf("  %d) %-5s (%s)\\n", j+1, t.shell, t.dir)
+			fmt.Printf("  %d) %-5s (%s)\n", j+1, t.shell, t.dir)
 		}
 		fmt.Printf("%s [1-3]: ", T("输入编号"))
 		line, _ := readLine()
@@ -281,11 +290,22 @@ func removeCompletions() {
 }
 
 func init() {
-	installCmd.Flags().StringVar(&installProxy, "proxy", "", T("下载内核使用的代理")+", "+T("如")+" http://192.168.1.1:7890")
-	installCmd.Flags().StringVar(&installSub, "sub", "", T("订阅链接")+"("+T("跳过交互式 init")+")")
-	installCmd.Flags().BoolVar(&installCompatible, "compatible", false, T("使用 amd64-compatible 内核(老旧 CPU)"))
-	installCmd.Flags().BoolVar(&installAllowLan, "allow-lan", false, T("允许局域网设备使用代理 (0.0.0.0)"))
-	installCmd.Flags().StringVar(&installCompletion, "completion", "", T("安装指定 shell 的补全 (bash/zsh/fish; 空=交互选择)"))
+	f := installCmd.Flags()
+	f.StringVar(&installProxy, "proxy", "", T("下载内核使用的代理")+", "+T("如")+" http://192.168.1.1:7890")
+	f.StringVar(&installMirrorFlag, "mirror", "", T("GitHub 镜像站前缀 (空=失败时自动尝试内置镜像)"))
+	f.StringVar(&installCore, "core", "", "latest|compatible")
+	f.StringVar(&installResource, "resource", "", "mmdb|asn|geoip|geosite|all")
+	f.BoolVar(&installSystemd, "systemd", false, T("重新生成 systemd 单元"))
+	f.StringVar(&installCompletionS, "completion", "", "bash|zsh|fish")
+	installCmd.RegisterFlagCompletionFunc("core", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		return []string{"latest", "compatible"}, cobra.ShellCompDirectiveNoFileComp
+	})
+	installCmd.RegisterFlagCompletionFunc("resource", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		return []string{"mmdb", "asn", "geoip", "geosite", "all"}, cobra.ShellCompDirectiveNoFileComp
+	})
+	installCmd.RegisterFlagCompletionFunc("completion", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		return []string{"bash", "zsh", "fish"}, cobra.ShellCompDirectiveNoFileComp
+	})
 	uninstallCmd.Flags().BoolVar(&uninstallPurge, "purge", false, T("同时删除配置/订阅/内核数据"))
-	rootCmd.AddCommand(installCmd, uninstallCmd, initCmd, runCmd)
+	rootCmd.AddCommand(installCmd, uninstallCmd, runCmd)
 }

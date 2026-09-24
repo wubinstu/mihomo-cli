@@ -280,12 +280,12 @@ func parseURL(u string) *url.URL {
 
 // FetchURL 依次尝试候选 URL: 指定代理 -> 自身代理 -> 各镜像 -> 直连
 func FetchURL(u, proxy, mirror, dst string) error {
-	return fetch(u, proxy, mirror, dst, func(r io.Reader, f *os.File) (int64, error) { return io.Copy(f, r) })
+	return fetch(u, proxy, mirror, dst, 0o644, func(r io.Reader, f *os.File) (int64, error) { return io.Copy(f, r) })
 }
 
 // FetchGunzip 同 FetchURL 但做 gunzip 解压 (内核二进制)
 func FetchGunzip(u, proxy, mirror, dst string) error {
-	return fetch(u, proxy, mirror, dst, func(r io.Reader, f *os.File) (int64, error) {
+	return fetch(u, proxy, mirror, dst, 0o755, func(r io.Reader, f *os.File) (int64, error) {
 		gz, err := gzip.NewReader(r)
 		if err != nil {
 			return 0, err
@@ -295,7 +295,7 @@ func FetchGunzip(u, proxy, mirror, dst string) error {
 	})
 }
 
-func fetch(u, proxy, mirror, dst string, process func(io.Reader, *os.File) (int64, error)) error {
+func fetch(u, proxy, mirror, dst string, mode os.FileMode, process func(io.Reader, *os.File) (int64, error)) error {
 	proxies := []string{}
 	if proxy != "" {
 		proxies = append(proxies, proxy)
@@ -307,7 +307,7 @@ func fetch(u, proxy, mirror, dst string, process func(io.Reader, *os.File) (int6
 	var lastErr error
 	for _, p := range append(proxies, "") {
 		for _, uu := range urls {
-			f, err := os.OpenFile(dst, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o755)
+			f, err := os.OpenFile(dst, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, mode)
 			if err != nil {
 				return err
 			}

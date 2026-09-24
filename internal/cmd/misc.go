@@ -67,52 +67,51 @@ var doctorCmd = &cobra.Command{
 			return "✘"
 		}
 		err := app.EnsureDirs()
-		fmt.Printf("%s %-16s %s\n", ok(err == nil), T("数据目录"), app.BaseDir)
+		fmt.Printf("%s %-20s %s\n", ok(err == nil), T("数据目录"), app.BaseDir)
 		v, err := core.Version()
-		fmt.Printf("%s %-16s %s\n", ok(err == nil), T("内核"), orDash(v, err))
+		fmt.Printf("%s %-20s %s\n", ok(err == nil), T("内核"), orDash(v, err))
 		var pinfo string
 		if p := s.Current(); p != nil {
 			pinfo = fmt.Sprintf("%s (%d %s, %s)", p.Name, p.Nodes, T("节点"), humanTime(p.UpdatedAt))
 		}
-		fmt.Printf("%s %-16s %s\n", ok(s.Current() != nil), T("订阅"), orDash(pinfo, nil))
+		fmt.Printf("%s %-20s %s\n", ok(s.Current() != nil), T("订阅"), orDash(pinfo, nil))
 		_, err = os.Stat(app.RuntimeConfig)
-		fmt.Printf("%s %-16s %s\n", ok(err == nil), T("运行配置"), app.RuntimeConfig)
+		fmt.Printf("%s %-20s %s\n", ok(err == nil), T("运行配置"), app.RuntimeConfig)
 		// geo 数据 (缺失会导致内核启动 fatal 循环)
 		geoOK := false
 		if _, err := os.Stat(app.RuntimeDir + "/geoip.metadb"); err == nil {
 			geoOK = true
 		}
-		fmt.Printf("%s %-16s %s\n", ok(geoOK), "geo " + T("数据"), map[bool]string{
+		fmt.Printf("%s %-20s %s\n", ok(geoOK), "geo " + T("数据"), map[bool]string{
 			true: T("已下载"), false: T("缺失 (mihomo-cli core geo)")}[geoOK])
 		active := sysd.IsActive()
 		svc := T("未运行 (mihomo-cli start)")
 		if active {
 			svc = T("运行中")
 		}
-		fmt.Printf("%s %-16s %s\n", ok(active), T("服务"), svc)
+		fmt.Printf("%s %-20s %s\n", ok(active), T("服务"), svc)
 		var apiInfo string
 		ver, err := api.New(s).Version()
 		if err == nil {
 			apiInfo = T("API 正常, 内核") + " " + ver
 		}
-		fmt.Printf("%s %-16s %s\n", ok(err == nil), T("控制API"), orDash(apiInfo, err))
+		fmt.Printf("%s %-20s %s\n", ok(err == nil), T("控制API"), orDash(apiInfo, err))
 		live := portOpen(fmt.Sprintf("127.0.0.1:%d", s.MixedPort))
-		fmt.Printf("%s %-16s 127.0.0.1:%d %s\n", ok(live), T("代理端口"), s.MixedPort, listenWord(live))
+		fmt.Printf("%s %-20s 127.0.0.1:%d %s\n", ok(live), T("代理端口"), s.MixedPort, listenWord(live))
 		if s.AllowLan {
 			live2 := portOpen(fmt.Sprintf("0.0.0.0:%d", s.MixedPort))
-			fmt.Printf("%s %-16s 0.0.0.0:%d %s (LAN: http://%s:%d)\n",
+			fmt.Printf("%s %-20s 0.0.0.0:%d %s (LAN: http://%s:%d)\n",
 				ok(live2), T("局域网"), s.MixedPort, listenWord(live2), lanIP(), s.MixedPort)
 		}
-		subOn := sysd.TimerEnabled("mihomo-cli-sub.timer")
-		fmt.Printf("%s %-16s %s (%s %s)\n", ok(subOn == s.SubAutoUpdateEnabled),
-			T("订阅自动更新"), onOff(subOn), T("周期"), s.SubAutoUpdateInterval)
-		resOn2 := sysd.TimerEnabled("mihomo-cli-resource.timer")
-		_ = resOn2
-		fmt.Printf("%s %-16s %s (%s %s)\n", ok(true), T("资源自动更新"),
+		// 顺序统一: Res / Sub / Node
+		fmt.Printf("%s %-20s %s (%s %s)\n", ok(true), T("Res auto-update"),
 			onOff(s.ResourceAutoUpdateEnabled), T("周期"), s.ResourceAutoUpdateInterval)
+		subOn := sysd.TimerEnabled("mihomo-cli-sub.timer")
+		fmt.Printf("%s %-20s %s (%s %s)\n", ok(subOn == s.SubAutoUpdateEnabled),
+			T("Sub auto-update"), onOff(subOn), T("周期"), s.SubAutoUpdateInterval)
 		autoOn := sysd.TimerEnabled("mihomo-cli-auto.timer")
-		fmt.Printf("%s %-16s %s (%s %s)\n", ok(autoOn == s.NodeAutoSelectEnabled),
-			T("节点自动择优"), onOff(autoOn), T("周期"), s.NodeAutoSelectInterval)
+		fmt.Printf("%s %-20s %s (%s %s)\n", ok(autoOn == s.NodeAutoSelectEnabled),
+			T("Node auto-select"), onOff(autoOn), T("周期"), s.NodeAutoSelectInterval)
 		fmt.Println(T("提示: 使用 curl -I https://www.google.com 验证代理是否生效 (先 eval $(mihomo-cli proxy on))"))
 		return nil
 	},
@@ -153,7 +152,7 @@ func portOpen(addr string) bool {
 
 // ---- version ----
 
-var Version = "1.1.1"
+var Version = "1.2.0"
 
 var versionCmd = &cobra.Command{
 	Use: "version",

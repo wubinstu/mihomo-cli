@@ -79,8 +79,13 @@ func CountNodes(data []byte) int {
 	return len(m.Proxies)
 }
 
-// Add 新增订阅: 下载 + 保存 + 生效
+// Add 新增订阅: 下载 + 保存 (激活遵循 activate)
 func Add(s *app.Settings, name, rawurl, proxy string) error {
+	return Add2(s, name, rawurl, proxy, s.CurrentProfile == "" && len(s.Profiles) == 0)
+}
+
+// Add2 新增订阅, activate 控制是否设为当前生效
+func Add2(s *app.Settings, name, rawurl, proxy string, activate bool) error {
 	name = Sanitize(name)
 	if s.FindProfile(name) != nil {
 		return fmt.Errorf("%s %q %s", i18n.T("订阅"), name, i18n.T("已存在"))
@@ -100,7 +105,7 @@ func Add(s *app.Settings, name, rawurl, proxy string) error {
 		Name: name, URL: rawurl, UpdatedAt: time.Now(),
 		Nodes: CountNodes(data), UserInfo: info,
 	})
-	if s.CurrentProfile == "" {
+	if activate {
 		s.CurrentProfile = name
 	}
 	return s.Save()
