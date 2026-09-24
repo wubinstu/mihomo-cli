@@ -143,7 +143,7 @@ func resolveStrategy(s *app.Settings, raw string) (string, error) {
 	if g := resolveGroupArg(ps, raw); g != nil {
 		return g.Name, nil
 	}
-	return "", fmt.Errorf("%s %q (%s)", T("未知策略"), raw, "DIRECT/REJECT/分组名")
+	return "", fmt.Errorf("%s %q (%s)", T("未知策略"), raw, "DIRECT/REJECT/group")
 }
 
 // ---- apply + 内核校验回滚 ----
@@ -278,7 +278,7 @@ var ruleCmd = &cobra.Command{
 mihomo-cli rule                       # ` + T("显示用户规则") + `
 mihomo-cli rule list --sub            # ` + T("同时显示订阅规则") + `
 mihomo-cli rule list --type DOMAIN [--condition ..] [--strategy ..] [--no-resolve]   # ` + T("过滤") + `
-mihomo-cli rule add --type <类型> --condition <条件> --strategy <策略> [--no-resolve]
+mihomo-cli rule add --type <type> --condition <cond> --strategy <strategy> [--no-resolve]
 mihomo-cli rule enable|disable <#id>
 mihomo-cli rule rm <#id>
 
@@ -428,7 +428,7 @@ var ruleDisableCmd = &cobra.Command{
 }
 
 var ruleRmCmd = &cobra.Command{
-	Use:   "rm <#id|关键词>",
+	Use:   "rm <#id|keyword>",
 	Short: T("删除规则"),
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {

@@ -370,7 +370,7 @@ var resources = []Resource{
 		"https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/GeoLite2-ASN.mmdb",
 		"https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/release/GeoLite2-ASN.mmdb",
 	}},
-	{"geoip", "geoip.dat", "GeoIP (dat, geodata 模式)", []string{
+	{"geoip", "geoip.dat", "GeoIP (dat, for geodata mode)", []string{
 		"https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geoip.dat",
 		"https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/release/geoip.dat",
 	}},

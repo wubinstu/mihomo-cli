@@ -51,7 +51,7 @@ var pingSites = []pingSite{
 var pingTimeout = 8 * time.Second
 
 var pingCmd = &cobra.Command{
-	Use:   "ping [站点名...]",
+	Use:   "ping [site...]",
 	Short: T("站点延迟与可用性检测 (经当前代理; 解锁判定为启发式)"),
 	Long: T("经本机代理端口访问站点, 输出 HTTP 状态与延迟; 2xx/3xx 视为可用, 403/451 视为地区受限。") + "\n" +
 		T("解锁判定为启发式 (仅看 HTTP 状态码), 仅供参考。"),

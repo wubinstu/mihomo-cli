@@ -5,7 +5,7 @@
 ## 架构与作用范围
 
 ```
-/usr/local/bin/mihomo-cli   CLI 客户端
+/usr/bin/mihomo-cli            CLI 客户端
 /etc/mihomo-cli/            全局配置 (内核/订阅/设置, 系统级共享; 文件头有管理警告, 勿手动编辑)
 /etc/systemd/system/        mihomo-cli.service (journal 日志) + 定时器
 ```
@@ -52,7 +52,7 @@ dns use|unuse [list]                            DNS (7 预设 + subN + 自定义
 top [watch N] [kill <id..>]                     流量/速度/连接总览 (PID 式编号)
 ping [站点...]                                  站点延迟/受限检测 (启发式)
 config get|set|reset-default|sync               配置管理 (分组展示/补全/单键详情)
-core version|upgrade|rollback|geo               内核管理 (geo 数据预下载)
+resource core|mmdb|asn|geoip|geosite          资源管理 (info/update; geo 数据可自动更新)
 log [-f]                                        日志 (journalctl)
 doctor / version / completion                   体检/版本/补全 (install 自动装)
 ```
@@ -78,9 +78,9 @@ mihomo-cli rule enable 1 / disable 1 / rm 1
 
 | 类别 | key | 默认 |
 |---|---|---|
-| 内核 | `allow-lan` / `mixed-port` / `proxy-mode` / `ipv6-enabled` / `log-level` | false / 7890 / 跟随订阅 / false / info |
+| 内核 | `allow-lan` `mixed-port` `proxy-mode` `ipv6-enabled` `log-level` `tcp-concurrent` `unified-delay` `keep-alive-interval` | false / 7890 / 跟随订阅 / false / info / 跟随 / 跟随 / 跟随 |
 | cli | `cli-language` / `install-mirror` / `test-url` / `test-timeout` | locale / 自动 / gstatic / 5000 |
-| 定时器 | `sub-auto-update-*` / `node-auto-select-*` | true 24h / false 30m |
+| 定时器 | `sub-auto-update-*` / `node-auto-select-*` / `resource-auto-update-*` | true 24h / false 30m / false 24h |
 
 `config reset-default [key|all]` 恢复默认; `config sync` 检测文件与内核运行差异，
 `sync update-service` 文件覆盖服务(重启)，`sync update-file` 运行状态覆盖文件。

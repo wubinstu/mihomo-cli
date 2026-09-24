@@ -153,7 +153,7 @@ func portOpen(addr string) bool {
 
 // ---- version ----
 
-var Version = "1.1.0"
+var Version = "1.1.1"
 
 var versionCmd = &cobra.Command{
 	Use: "version",
