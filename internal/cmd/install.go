@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 
@@ -37,6 +38,7 @@ var installProxy string
 var installSub string
 var installCompatible bool
 var installAllowLan bool
+var installCompletion string
 
 var installCmd = &cobra.Command{
 	Use:   "install",
@@ -63,7 +65,7 @@ var installCmd = &cobra.Command{
 				return err
 			}
 			fmt.Printf("%s: %s (arch=%s)\n", T("最新内核版本"), rel.TagName, core.ArchName())
-			if err := core.DownloadInstall(rel.TagName, installProxy, s.InstallMirror, installCompatible); err != nil {
+			if err := core.DownloadInstall(rel.TagName, installProxy, s.GithubMirror, installCompatible); err != nil {
 				return err
 			}
 		} else {
@@ -76,7 +78,7 @@ var installCmd = &cobra.Command{
 
 		// 2. geo 数据预下载 (避免内核首次启动直连 GitHub 下载 MMDB 失败导致 fatal 循环)
 		fmt.Println(T("预下载 geo 数据 (geoip/geosite) ..."))
-		if err := core.DownloadGeo(installProxy, s.InstallMirror); err != nil {
+		if err := core.DownloadGeo(installProxy, s.GithubMirror); err != nil {
 			fmt.Fprintf(os.Stderr, "%s: %v\n", T("警告: geo 数据下载失败"), err)
 		}
 
@@ -100,7 +102,7 @@ var installCmd = &cobra.Command{
 		if err := sysd.InstallTimers(s); err != nil {
 			fmt.Fprintf(os.Stderr, "%s: %v\n", T("警告: 定时任务安装失败"), err)
 		}
-		installCompletions()
+		installCompletions(installCompletion)
 
 		// 配置目录属主交给发起安装的用户 (sudo 调用), 该用户后续无需 sudo 即可管理
 		if u := os.Getenv("SUDO_USER"); u != "" && u != "root" {
@@ -133,6 +135,9 @@ var uninstallCmd = &cobra.Command{
 		fmt.Println(T("停止并移除 systemd 单元 ..."))
 		sysd.RemoveAll()
 		removeCompletions()
+		for _, bin := range []string{"/usr/bin/mihomo-cli", "/usr/local/bin/mihomo-cli"} {
+			_ = exec.Command("rm", "-f", bin).Run()
+		}
 		if uninstallPurge {
 			fmt.Printf("%s %s ...\n", T("删除"), app.BaseDir)
 			if err := os.RemoveAll(app.BaseDir); err != nil {
@@ -201,75 +206,76 @@ func readLine() (string, error) {
 	return string(buf[:n]), nil
 }
 
-// installCompletions 为已安装的 shell 安装补全脚本 (跟随 mihomo-cli install)
-func installCompletions() {
+// installCompletions 安装 shell 补全到全局目录 (系统级, 全用户可用)
+func installCompletions(shell string) {
 	type target struct {
-		dir  string
-		file string
-		gen  func(w io.Writer) error
+		shell string
+		dir   string
+		file  string
+		gen   func(w io.Writer) error
 	}
 	targets := []target{
-		{"/usr/local/share/bash-completion/completions", "mihomo-cli", func(w io.Writer) error { return rootCmd.GenBashCompletionV2(w, false) }},
-		{"/usr/local/share/zsh/site-functions", "_mihomo-cli", func(w io.Writer) error { return rootCmd.GenZshCompletion(w) }},
-		{"/usr/local/share/fish/completions", "mihomo-cli.fish", func(w io.Writer) error { return rootCmd.GenFishCompletion(w, false) }},
+		{"bash", "/usr/share/bash-completion/completions", "mihomo-cli", func(w io.Writer) error { return rootCmd.GenBashCompletionV2(w, false) }},
+		{"zsh", "/usr/share/zsh/site-functions", "_mihomo-cli", func(w io.Writer) error { return rootCmd.GenZshCompletion(w) }},
+		{"fish", "/usr/share/fish/completions", "mihomo-cli.fish", func(w io.Writer) error { return rootCmd.GenFishCompletion(w, false) }},
 	}
-	home, _ := os.UserHomeDir()
-	fallbacks := map[int]string{
-		0: home + "/.local/share/bash-completion/completions",
-		1: home + "/.local/share/zsh/site-functions",
-		2: home + "/.config/fish/completions",
-	}
-	for i, t := range targets {
-		dir := t.dir
-		if _, err := os.Stat(t.dir); err != nil {
-			dir = fallbacks[i]
-			if err := os.MkdirAll(dir, 0o755); err != nil {
-				continue
+	var chosen []target
+	if shell != "" {
+		for _, t := range targets {
+			if t.shell == shell {
+				chosen = append(chosen, t)
 			}
 		}
-		if dir == t.dir && os.Geteuid() != 0 {
-			// 系统目录需要 root: sudo tee
-			var buf bytes.Buffer
-			if t.gen(&buf) != nil {
-				continue
-			}
-			c := exec.Command("sudo", "tee", filepath.Join(dir, t.file))
-			c.Stdin = &buf
-			c.Stdout = nil
-			c.Stderr = os.Stderr
-			if c.Run() == nil {
-				fmt.Printf("%s %s\n", T("补全已安装"), filepath.Join(dir, t.file))
-			}
+		if len(chosen) == 0 {
+			fmt.Printf("%s: %s\\n", T("未知 shell"), shell)
+			return
+		}
+	} else {
+		// 交互选择
+		fmt.Println(T("请选择要安装补全的 shell:"))
+		for j, t := range targets {
+			fmt.Printf("  %d) %-5s (%s)\\n", j+1, t.shell, t.dir)
+		}
+		fmt.Printf("%s [1-3]: ", T("输入编号"))
+		line, _ := readLine()
+		line = strings.TrimSpace(line)
+		n, err := strconv.Atoi(line)
+		if err != nil || n < 1 || n > len(targets) {
+			fmt.Println(T("跳过补全安装"))
+			return
+		}
+		chosen = append(chosen, targets[n-1])
+	}
+	for _, t := range chosen {
+		if err := os.MkdirAll(t.dir, 0o755); err != nil {
 			continue
 		}
-		f, err := os.Create(filepath.Join(dir, t.file))
-		if err != nil {
+		var buf bytes.Buffer
+		if t.gen(&buf) != nil {
 			continue
 		}
-		if err := t.gen(f); err == nil {
-			fmt.Printf("%s %s\n", T("补全已安装"), filepath.Join(dir, t.file))
+		c := exec.Command("tee", filepath.Join(t.dir, t.file))
+		c.Stdin = &buf
+		c.Stdout = nil
+		c.Stderr = os.Stderr
+		if c.Run() == nil {
+			fmt.Printf("%s %s\n", T("补全已安装"), filepath.Join(t.dir, t.file))
 		}
-		f.Close()
 	}
 }
 
 // removeCompletions 清理补全脚本 (跟随 uninstall)
 func removeCompletions() {
-	home, _ := os.UserHomeDir()
 	for _, p := range []string{
+		"/usr/share/bash-completion/completions/mihomo-cli",
+		"/usr/share/zsh/site-functions/_mihomo-cli",
+		"/usr/share/fish/completions/mihomo-cli.fish",
 		"/usr/local/share/bash-completion/completions/mihomo-cli",
 		"/usr/local/share/zsh/site-functions/_mihomo-cli",
 		"/usr/local/share/fish/completions/mihomo-cli.fish",
-		home + "/.local/share/bash-completion/completions/mihomo-cli",
-		home + "/.local/share/zsh/site-functions/_mihomo-cli",
-		home + "/.config/fish/completions/mihomo-cli.fish",
 	} {
 		if _, err := os.Stat(p); err == nil {
-			if os.Geteuid() == 0 {
-				_ = os.Remove(p)
-			} else {
-				_ = exec.Command("sudo", "rm", "-f", p).Run()
-			}
+			_ = exec.Command("rm", "-f", p).Run()
 		}
 	}
 }
@@ -279,6 +285,7 @@ func init() {
 	installCmd.Flags().StringVar(&installSub, "sub", "", T("订阅链接")+"("+T("跳过交互式 init")+")")
 	installCmd.Flags().BoolVar(&installCompatible, "compatible", false, T("使用 amd64-compatible 内核(老旧 CPU)"))
 	installCmd.Flags().BoolVar(&installAllowLan, "allow-lan", false, T("允许局域网设备使用代理 (0.0.0.0)"))
+	installCmd.Flags().StringVar(&installCompletion, "completion", "", T("安装指定 shell 的补全 (bash/zsh/fish; 空=交互选择)"))
 	uninstallCmd.Flags().BoolVar(&uninstallPurge, "purge", false, T("同时删除配置/订阅/内核数据"))
 	rootCmd.AddCommand(installCmd, uninstallCmd, initCmd, runCmd)
 }

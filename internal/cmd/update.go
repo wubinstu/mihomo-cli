@@ -53,7 +53,7 @@ var updateCmd = &cobra.Command{
 		tgz := filepath.Join(tmp, "pkg.tgz")
 
 		_ = hc
-		if err := core.FetchURL(assetURL, updProxy, mustSettings().InstallMirror, tgz); err != nil {
+		if err := core.FetchURL(assetURL, updProxy, mustSettings().GithubMirror, tgz); err != nil {
 			return err
 		}
 
@@ -158,7 +158,5 @@ func cliArchAsset() string {
 
 func init() {
 	updateCmd.Flags().StringVar(&updProxy, "proxy", "", T("下载使用的代理 (空=按环境变量/直连)"))
-	coreUpgradeCmd.Flags().StringVar(&dlProxy, "proxy", "", T("下载使用的代理 (空=按环境变量/直连)"))
-	coreGeoCmd.Flags().StringVar(&dlProxy, "proxy", "", T("下载使用的代理 (空=按环境变量/直连)"))
 	rootCmd.AddCommand(updateCmd)
 }

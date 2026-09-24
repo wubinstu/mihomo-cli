@@ -223,7 +223,7 @@ func s_mirror() string {
 	if err != nil {
 		return ""
 	}
-	return s.InstallMirror
+	return s.GithubMirror
 }
 
 func CoreBinPath() string { return filepath.Clean(app.CoreBin) }
@@ -355,34 +355,95 @@ var geoMirrors = map[string][]string{
 	},
 }
 
-// DownloadGeo 预下载 geo 数据到 runtime 目录, 避免内核启动时直连 GitHub 下载失败导致 fatal 循环
-func DownloadGeo(proxy, mirrorPref string) error {
-	for name, urls := range geoMirrors {
-		dst := filepath.Join(app.RuntimeDir, name)
-		if _, err := os.Stat(dst); err == nil {
+// Resource 可管理资源 (内核二进制 + geo 数据)
+type Resource struct {
+	Name string // core / mmdb / asn / geoip / geosite
+	File string // 落盘路径
+	Desc string
+	URLs []string
+}
+
+var resources = []Resource{
+	{"mmdb", "geoip.metadb", "GeoIP (metadb)", geoMirrors["geoip.metadb"]},
+	{"geosite", "GeoSite.dat", "GeoSite", geoMirrors["GeoSite.dat"]},
+	{"asn", "GeoLite2-ASN.mmdb", "GeoLite2 ASN", []string{
+		"https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/GeoLite2-ASN.mmdb",
+		"https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/release/GeoLite2-ASN.mmdb",
+	}},
+	{"geoip", "geoip.dat", "GeoIP (dat, geodata 模式)", []string{
+		"https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geoip.dat",
+		"https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/release/geoip.dat",
+	}},
+}
+
+// Resources 返回数据资源列表 (不含 core)
+func Resources() []Resource { return resources }
+
+// ResourceInfo 资源状态: 是否已安装 / 修改时间 / 大小
+func ResourceInfo(name string) (path string, ok bool, modTime time.Time, size int64) {
+	for _, r := range resources {
+		if r.Name != name {
 			continue
 		}
+		p := filepath.Join(app.RuntimeDir, r.File)
+		st, err := os.Stat(p)
+		if err != nil {
+			return p, false, time.Time{}, 0
+		}
+		return p, true, st.ModTime(), st.Size()
+	}
+	return "", false, time.Time{}, 0
+}
+
+// UpdateResource 下载/更新指定数据资源
+func UpdateResource(name, proxy, mirror string) error {
+	for _, r := range resources {
+		if r.Name != name {
+			continue
+		}
+		dst := filepath.Join(app.RuntimeDir, r.File)
+		fmt.Printf("%s %s (%s) ...\n", i18n.T("更新资源"), r.Name, r.Desc)
 		var lastErr error
-		for _, u := range urls {
-			for attempt := 1; attempt <= 3; attempt++ {
-				fmt.Printf("%s %s (%s, %d/3) ...\n", i18n.T("下载"), name, shortURL(u), attempt)
-				if err := FetchURL(u, proxy, mirrorPref, dst+".tmp"); err != nil {
-					lastErr = err
-					fmt.Printf("  %s: %v\n", i18n.T("下载失败"), err)
-					continue
-				}
-				if err := os.Rename(dst+".tmp", dst); err != nil {
-					return err
-				}
-				break
+		for _, u := range r.URLs {
+			if err := FetchURL(u, proxy, mirror, dst+".tmp"); err != nil {
+				lastErr = err
+				continue
 			}
-			if _, err := os.Stat(dst); err == nil {
-				break
+			if err := os.Rename(dst+".tmp", dst); err != nil {
+				return err
 			}
+			return nil
 		}
-		if _, err := os.Stat(dst); err != nil {
-			return fmt.Errorf("%s: %w", name, lastErr)
+		return lastErr
+	}
+	return fmt.Errorf("unknown resource %q", name)
+}
+
+// UpdateAllResources 更新全部数据资源 (定时任务调用)
+func UpdateAllResources(proxy, mirror string) error {
+	var errs []string
+	for _, r := range resources {
+		if err := UpdateResource(r.Name, proxy, mirror); err != nil {
+			errs = append(errs, r.Name+": "+err.Error())
 		}
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("%s", strings.Join(errs, "; "))
+	}
+	return nil
+}
+
+// DownloadGeo 预下载 geo 数据到 runtime 目录 (install 调用: mmdb+geosite)
+func DownloadGeo(proxy, mirrorPref string) error {
+	for _, name := range []string{"mmdb", "geosite"} {
+		p, ok, _, _ := ResourceInfo(name)
+		if ok {
+			continue
+		}
+		if err := UpdateResource(name, proxy, mirrorPref); err != nil {
+			return err
+		}
+		_ = p
 	}
 	return nil
 }

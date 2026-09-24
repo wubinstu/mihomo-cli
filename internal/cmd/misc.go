@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"path/filepath"
 	"os/exec"
 	"runtime"
 	"time"
@@ -107,6 +106,10 @@ var doctorCmd = &cobra.Command{
 		subOn := sysd.TimerEnabled("mihomo-cli-sub.timer")
 		fmt.Printf("%s %-16s %s (%s %s)\n", ok(subOn == s.SubAutoUpdateEnabled),
 			T("订阅自动更新"), onOff(subOn), T("周期"), s.SubAutoUpdateInterval)
+		resOn2 := sysd.TimerEnabled("mihomo-cli-resource.timer")
+		_ = resOn2
+		fmt.Printf("%s %-16s %s (%s %s)\n", ok(true), T("资源自动更新"),
+			onOff(s.ResourceAutoUpdateEnabled), T("周期"), s.ResourceAutoUpdateInterval)
 		autoOn := sysd.TimerEnabled("mihomo-cli-auto.timer")
 		fmt.Printf("%s %-16s %s (%s %s)\n", ok(autoOn == s.NodeAutoSelectEnabled),
 			T("节点自动择优"), onOff(autoOn), T("周期"), s.NodeAutoSelectInterval)
@@ -148,57 +151,9 @@ func portOpen(addr string) bool {
 	return true
 }
 
-// ---- core ----
-
-var coreCmd = &cobra.Command{
-	Use:   "core",
-	Short: T("内核管理: version/upgrade/rollback"),
-}
-
-var coreVersionCmd = &cobra.Command{
-	Use: "version",
-	Short: T("已安装内核版本"),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		v, err := core.Version()
-		if err != nil {
-			return err
-		}
-		fmt.Println(v)
-		return nil
-	},
-}
-
-var coreUpgradeCmd = &cobra.Command{
-	Use:   "upgrade",
-	Short: T("升级内核 (从 GitHub Releases)"),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := core.Upgrade(dlProxy, false); err != nil {
-			return err
-		}
-		if sysd.IsActive() {
-			return sysd.Service("restart")
-		}
-		return nil
-	},
-}
-
-var coreRollbackCmd = &cobra.Command{
-	Use:   "rollback",
-	Short: T("回滚到上一版本"),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := core.Rollback(); err != nil {
-			return err
-		}
-		if sysd.IsActive() {
-			return sysd.Service("restart")
-		}
-		return nil
-	},
-}
-
 // ---- version ----
 
-var Version = "1.0.1"
+var Version = "1.1.0"
 
 var versionCmd = &cobra.Command{
 	Use: "version",
@@ -219,28 +174,7 @@ func humanBytes(n int64) string {
 	return fmt.Sprintf("%.1fPiB", f)
 }
 
-var dlProxy string
-
-var coreGeoCmd = &cobra.Command{
-	Use:   "geo",
-	Short: T("下载/更新 geo 数据 (geoip/geosite, 内核规则依赖)"),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		s := mustSettings()
-		// 强制刷新: 删除已有文件
-		for _, f := range []string{"geoip.metadb", "GeoSite.dat"} {
-			_ = os.Remove(filepath.Join(app.RuntimeDir, f))
-		}
-		if err := core.DownloadGeo(dlProxy, mustSettings().InstallMirror); err != nil {
-			return err
-		}
-		fmt.Println(T("已下载"))
-		reloadIfActive(s)
-		return nil
-	},
-}
-
 func init() {
 	logCmd.Flags().BoolVarP(&logFollow, "follow", "f", false, T("跟随日志"))
-	coreCmd.AddCommand(coreVersionCmd, coreUpgradeCmd, coreRollbackCmd, coreGeoCmd)
-	rootCmd.AddCommand(logCmd, doctorCmd, coreCmd, versionCmd)
+	rootCmd.AddCommand(logCmd, doctorCmd, versionCmd)
 }

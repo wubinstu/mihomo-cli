@@ -119,6 +119,24 @@ Description=mihomo-cli: auto select lowest-latency proxy
 Type=oneshot
 ExecStart=%s node auto
 `, cli)
+	resUnit := fmt.Sprintf(`[Unit]
+Description=mihomo-cli: auto update geo resources
+
+[Service]
+Type=oneshot
+ExecStart=%s resource update-all
+`, cli)
+	resTimer := fmt.Sprintf(`[Unit]
+Description=mihomo-cli: resource update timer
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=%s
+Unit=mihomo-cli-resource.service
+
+[Install]
+WantedBy=timers.target
+`, systemdDur(s.ResourceAutoUpdateInterval))
 	autoTimer := fmt.Sprintf(`[Unit]
 Description=mihomo-cli: auto select timer
 
@@ -143,7 +161,21 @@ WantedBy=timers.target
 	if err := writeUnit("mihomo-cli-auto.timer", autoTimer); err != nil {
 		return err
 	}
+	if err := writeUnit("mihomo-cli-resource.service", resUnit); err != nil {
+		return err
+	}
+	if err := writeUnit("mihomo-cli-resource.timer", resTimer); err != nil {
+		return err
+	}
 	if err := daemonReload(); err != nil {
+		return err
+	}
+	if s.ResourceAutoUpdateEnabled {
+		_, err = runRoot("systemctl", "enable", "--now", "mihomo-cli-resource.timer")
+	} else {
+		_, _ = runRoot("systemctl", "disable", "--now", "mihomo-cli-resource.timer")
+	}
+	if err != nil {
 		return err
 	}
 	// 按设置启停
@@ -169,11 +201,13 @@ func systemdDur(d time.Duration) string {
 
 // RemoveAll 卸载全部单元文件
 func RemoveAll() {
-	_, _ = runRoot("systemctl", "disable", "--now", serviceName, "mihomo-cli-sub.timer", "mihomo-cli-auto.timer")
+	_, _ = runRoot("systemctl", "disable", "--now", serviceName, "mihomo-cli-sub.timer", "mihomo-cli-auto.timer", "mihomo-cli-resource.timer")
 	removeUnit(serviceName)
 	removeUnit("mihomo-cli-sub.service")
 	removeUnit("mihomo-cli-sub.timer")
 	removeUnit("mihomo-cli-auto.service")
+	removeUnit("mihomo-cli-resource.timer")
+	removeUnit("mihomo-cli-resource.service")
 	removeUnit("mihomo-cli-auto.timer")
 	_ = daemonReload()
 }

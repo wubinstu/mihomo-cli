@@ -106,6 +106,15 @@ func Generate(s *app.Settings) error {
 	if s.LogLevel != "" {
 		cfg["log-level"] = s.LogLevel
 	}
+	if s.TCPConcurrent != nil {
+		cfg["tcp-concurrent"] = *s.TCPConcurrent
+	}
+	if s.UnifiedDelay != nil {
+		cfg["unified-delay"] = *s.UnifiedDelay
+	}
+	if s.KeepAliveInterval != nil {
+		cfg["keep-alive-interval"] = *s.KeepAliveInterval
+	}
 	// 用户规则优先: 置于订阅规则之前 (mihomo 首条匹配即生效)
 	if enabled := s.EnabledRules(); len(enabled) > 0 {
 		subRules := []string{}

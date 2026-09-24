@@ -63,7 +63,7 @@ tar xzf "$TMP/mihomo-cli.tar.gz" -C "$TMP"
 
 SUDO=""
 [ "$(id -u)" != 0 ] && SUDO="sudo"
-$SUDO install -m 0755 "$TMP/mihomo-cli" /usr/local/bin/mihomo-cli
+$SUDO install -m 0755 "$TMP/mihomo-cli" /usr/bin/mihomo-cli
 
 echo ">> 完成: $(mihomo-cli version)"
 echo ">> 下一步: mihomo-cli install [--proxy ...] && mihomo-cli init && mihomo-cli start"

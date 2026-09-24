@@ -45,18 +45,22 @@ func (r UserRule) String() string {
 // Settings cli 自身配置 (config.toml, 由程序管理, 请勿手动编辑)
 type Settings struct {
 	// ---- cli 自身 ----
-	CLILanguage   string `toml:"cli_language"` // zh | en; 空则按 $LANG
+	CLILanguage    string `toml:"cli_language"` // zh | en; 空则按 $LANG
 	CurrentProfile string `toml:"current_profile"`
 	CurrentGroup   string `toml:"current_group"`
-	InstallMirror  string `toml:"install_mirror,omitempty"` // GitHub 镜像站前缀, 空=自动尝试
+	GithubMirror   string `toml:"github_mirror,omitempty"` // GitHub 镜像站前缀, 空=自动尝试
 
 	// ---- 内核 config.yaml (render 注入) ----
-	AllowLan   bool     `toml:"allow_lan"`
-	MixedPort  int      `toml:"mixed_port"`
-	ProxyMode  string   `toml:"proxy_mode"` // rule/global/direct; 空则跟随订阅
-	IPV6Enabled bool    `toml:"ipv6_enabled,omitempty"`
-	LogLevel   string   `toml:"log_level,omitempty"` // debug/info/warning/error/silent
-	DNSServers []string `toml:"dns_servers,omitempty"`
+	AllowLan    bool     `toml:"allow_lan"`
+	MixedPort   int      `toml:"mixed_port"`
+	ProxyMode   string   `toml:"proxy_mode"` // rule/global/direct; 空则跟随订阅
+	IPV6Enabled bool     `toml:"ipv6_enabled,omitempty"`
+	LogLevel    string   `toml:"log_level,omitempty"` // debug/info/warning/error/silent
+	DNSServers  []string `toml:"dns_servers,omitempty"`
+	// 高级内核参数 (nil = 跟随订阅/内核默认)
+	TCPConcurrent      *bool `toml:"tcp_concurrent,omitempty"`
+	UnifiedDelay       *bool `toml:"unified_delay,omitempty"`
+	KeepAliveInterval  *int  `toml:"keep_alive_interval,omitempty"`
 
 	// ---- 外部控制 API ----
 	APIBase   string `toml:"api_base"`
@@ -68,6 +72,11 @@ type Settings struct {
 	NodeAutoSelectEnabled bool          `toml:"node_auto_select_enabled"`
 	NodeAutoSelectInterval time.Duration `toml:"node_auto_select_interval"`
 	AutoSelectLastRun     time.Time     `toml:"auto_select_last_run,omitempty"`
+
+	// ---- 资源自动更新 (mmdb/asn/geoip/geosite 数据, systemd timer) ----
+	ResourceAutoUpdateEnabled  bool          `toml:"resource_auto_update_enabled"`
+	ResourceAutoUpdateInterval time.Duration `toml:"resource_auto_update_interval"`
+	ResourceLastRun            time.Time     `toml:"resource_last_run,omitempty"`
 
 	TestURL     string `toml:"test_url"`
 	TestTimeout int    `toml:"test_timeout_ms"`
@@ -86,6 +95,8 @@ func DefaultSettings() *Settings {
 		SubAutoUpdateInterval:   24 * time.Hour,
 		NodeAutoSelectEnabled:   false,
 		NodeAutoSelectInterval:  30 * time.Minute,
+		ResourceAutoUpdateEnabled:  false,
+		ResourceAutoUpdateInterval: 24 * time.Hour,
 		TestURL:                 "https://www.gstatic.com/generate_204",
 		TestTimeout:             5000,
 	}
@@ -144,6 +155,9 @@ func (s *Settings) fixup() {
 	if s.NodeAutoSelectInterval <= 0 {
 		s.NodeAutoSelectInterval = 30 * time.Minute
 	}
+	if s.ResourceAutoUpdateInterval <= 0 {
+		s.ResourceAutoUpdateInterval = 24 * time.Hour
+	}
 	if s.TestURL == "" {
 		s.TestURL = "https://www.gstatic.com/generate_204"
 	}
@@ -191,8 +205,8 @@ func (s *Settings) Save() error {
 	w("cli_language = %s\n", tomlStr(orDefault(s.CLILanguage, "")))
 	w("current_profile = %s\n", tomlStr(s.CurrentProfile))
 	w("current_group = %s\n", tomlStr(s.CurrentGroup))
-	if s.InstallMirror != "" {
-		w("install_mirror = %s\n", tomlStr(s.InstallMirror))
+	if s.GithubMirror != "" {
+		w("github_mirror = %s\n", tomlStr(s.GithubMirror))
 	}
 
 	w("\n# ---------- core (注入内核 config.yaml) ----------\n")
@@ -204,6 +218,15 @@ func (s *Settings) Save() error {
 	if len(s.DNSServers) > 0 {
 		w("dns_servers = [%s]\n", tomlArr(s.DNSServers))
 	}
+	if s.TCPConcurrent != nil {
+		w("tcp_concurrent = %v\n", *s.TCPConcurrent)
+	}
+	if s.UnifiedDelay != nil {
+		w("unified_delay = %v\n", *s.UnifiedDelay)
+	}
+	if s.KeepAliveInterval != nil {
+		w("keep_alive_interval = %d\n", *s.KeepAliveInterval)
+	}
 
 	w("\n# ---------- control api ----------\n")
 	w("api_base = %s\n", tomlStr(s.APIBase))
@@ -214,6 +237,11 @@ func (s *Settings) Save() error {
 	w("sub_auto_update_interval = %s\n", tomlStr(s.SubAutoUpdateInterval.String()))
 	w("node_auto_select_enabled = %v\n", s.NodeAutoSelectEnabled)
 	w("node_auto_select_interval = %s\n", tomlStr(s.NodeAutoSelectInterval.String()))
+	w("resource_auto_update_enabled = %v\n", s.ResourceAutoUpdateEnabled)
+	w("resource_auto_update_interval = %s\n", tomlStr(s.ResourceAutoUpdateInterval.String()))
+	if !s.ResourceLastRun.IsZero() {
+		w("resource_last_run = %s\n", s.ResourceLastRun.Format("2006-01-02T15:04:05Z07:00"))
+	}
 	if !s.AutoSelectLastRun.IsZero() {
 		w("auto_select_last_run = %s\n", s.AutoSelectLastRun.Format("2006-01-02T15:04:05Z07:00"))
 	}

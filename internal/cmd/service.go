@@ -146,6 +146,15 @@ func printTimers(s *app.Settings) {
 		fmt.Printf("%-16s %s | %s %s\n", T("节点自动择优"),
 			onOff2(s.NodeAutoSelectEnabled), T("上次"), last2)
 	}
+	rlast := humanTime(s.ResourceLastRun)
+	if s.ResourceAutoUpdateEnabled {
+		rnext := remaining(s.ResourceLastRun, s.ResourceAutoUpdateInterval)
+		fmt.Printf("%-16s %s | %s %s | %s %s\n", T("资源自动更新"),
+			onOff2(s.ResourceAutoUpdateEnabled), T("上次"), rlast, T("下次"), rnext)
+	} else {
+		fmt.Printf("%-16s %s | %s %s\n", T("资源自动更新"),
+			onOff2(s.ResourceAutoUpdateEnabled), T("上次"), rlast)
+	}
 }
 
 func onOff2(b bool) string {
