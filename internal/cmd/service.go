@@ -9,8 +9,10 @@ import (
 
 	"github.com/wubinstu/mihomo-cli/internal/api"
 	"github.com/wubinstu/mihomo-cli/internal/app"
+	"github.com/wubinstu/mihomo-cli/internal/cfg"
 	"github.com/wubinstu/mihomo-cli/internal/render"
 	"github.com/wubinstu/mihomo-cli/internal/sysd"
+	"github.com/wubinstu/mihomo-cli/internal/ui"
 )
 
 func mustSettings() *app.Settings {
@@ -24,7 +26,7 @@ func mustSettings() *app.Settings {
 func serviceAction(action string) error {
 	s := mustSettings()
 	if s.Current() == nil {
-		return fmt.Errorf("%s", T("没有订阅, 请先 mihomo-cli init"))
+		return fmt.Errorf("%s (%s)", T("没有可用订阅"), T("mihomo-cli sub use <id|名称>"))
 	}
 	if action != "stop" {
 		if err := render.Generate(s); err != nil {
@@ -47,129 +49,123 @@ var startCmd = &cobra.Command{Use: "start", Short: T("启动代理服务"), RunE
 var stopCmd = &cobra.Command{Use: "stop", Short: T("停止代理服务"), RunE: func(*cobra.Command, []string) error { return serviceAction("stop") }}
 var restartCmd = &cobra.Command{Use: "restart", Short: T("重启代理服务"), RunE: func(*cobra.Command, []string) error { return serviceAction("restart") }}
 
+// statusCmd 服务与代理状态: 与 doctor 共用同一套标签与列宽, 顺序固定 Res → Sub → Node
 var statusCmd = &cobra.Command{
-	Use: "status",
+	Use:   "status",
 	Short: T("查看服务与代理状态"),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		s := mustSettings()
 		active := sysd.IsActive()
+		var rows []checkRow
+
 		state := T("未运行")
 		if active {
 			state = T("运行中")
 		}
-		fmt.Printf("%-20s %s\n", T("服务状态"), state)
+		rows = append(rows, checkRow{true, T("Service"), state})
+
+		c := api.New(s)
 		if active {
-			c := api.New(s)
 			if v, err := c.Version(); err == nil {
-				fmt.Printf("%-20s %s\n", T("内核版本"), v)
+				rows = append(rows, checkRow{true, T("Core"), v})
 			}
 			if m, err := c.ConfigMode(); err == nil {
-				fmt.Printf("%-20s %s\n", T("代理模式"), m)
+				rows = append(rows, checkRow{true, T("Mode"), m})
 			}
 		}
-		fmt.Printf("%-20s %d (http+socks5)\n", T("混合端口"), s.MixedPort)
-		lan := T("仅本机 (127.0.0.1)")
+		rows = append(rows, checkRow{true, T("Proxy port"), mixedPortText(s)})
 		if s.AllowLan {
-			lan = T("允许 (0.0.0.0)")
-		}
-		fmt.Printf("%-20s %s\n", T("局域网"), lan)
-		if len(s.DNSServers) == 0 {
-			fmt.Printf("%-20s %s\n", T("当前DNS"), T("跟随订阅"))
+			rows = append(rows, checkRow{true, T("LAN"),
+				fmt.Sprintf("allowed (http://%s:%d)", lanIP(), s.ProxyPort())})
 		} else {
-			fmt.Printf("%-20s %s\n", T("当前DNS"), strings.Join(s.DNSServers, ", "))
+			rows = append(rows, checkRow{true, T("LAN"), T("仅本机 (127.0.0.1)")})
 		}
+		if len(s.DNSServers) == 0 {
+			rows = append(rows, checkRow{true, T("DNS"), T("跟随订阅")})
+		} else {
+			rows = append(rows, checkRow{true, T("DNS"), strings.Join(s.DNSServers, ", ")})
+		}
+		if k := cfgLookup("dns.enable"); k != nil && k.Get(s) == "true" {
+			rows = append(rows, checkRow{true, T("DNS override"), T("已开启")})
+		}
+		if k := cfgLookup("tun.enable"); k != nil && k.Get(s) == "true" {
+			rows = append(rows, checkRow{true, T("TUN"), T("已开启")})
+		}
+
 		if active {
-			if r, err := api.New(s).Connections(); err == nil {
-				fmt.Printf("%-20s ↑ %s  ↓ %s  (%d %s)\n", T("流量统计"),
-					humanBytes(r.UploadTotal), humanBytes(r.DownloadTotal),
-					len(r.Connections), T("活动连接"))
+			if r, err := c.Connections(); err == nil {
+				rows = append(rows, checkRow{true, T("Traffic"),
+					fmt.Sprintf("↑ %s  ↓ %s  (%d %s)", humanBytes(r.UploadTotal), humanBytes(r.DownloadTotal),
+						len(r.Connections), T("活动连接"))})
 			}
 		}
 		if p := s.Current(); p != nil {
-			fmt.Printf("%-20s sub%d:%s (%d %s, %s)\n", T("当前订阅"), subIndex(s, p.Name), p.Name, p.Nodes, T("节点"), p.UpdatedAt.Format("2006-01-02 15:04"))
-		} else {
-			fmt.Printf("%-20s %s\n", T("当前订阅"), T("悬空 (sub unuse)"))
-			if active {
-				fmt.Printf("%-20s %s\n", T("内核流量"), T("DIRECT (空配置)"))
-			}
-		}
-		if s.Current() != nil && s.CurrentGroup != "" && active {
-			c := api.New(s)
-			if ps, err := c.Proxies(); err == nil {
-				if g := resolveGroupArg(ps, s.CurrentGroup); g != nil {
-					gid := groupID(ps, g.Name)
-					if g.Now != "" {
-						d := c.LastDelay(g.Now)
-						dTxt := "-"
-						if d > 0 {
-							dTxt = fmt.Sprintf("%d ms", d)
+			rows = append(rows, checkRow{true, T("Profile"),
+				fmt.Sprintf("sub%d:%s (%d %s, %s)", subIndex(s, p.Name), p.Name, p.Nodes, T("节点"),
+					humanTime(p.UpdatedAt))})
+			if s.CurrentGroup != "" && active {
+				if ps, err := c.Proxies(); err == nil {
+					if g := resolveGroupArg(ps, s.CurrentGroup); g != nil {
+						gid := groupID(ps, g.Name)
+						if g.Now != "" {
+							d := c.LastDelay(g.Now)
+							dTxt := "-"
+							if d > 0 {
+								dTxt = fmt.Sprintf("%d ms", d)
+							}
+							rows = append(rows, checkRow{true, T("Chain"),
+								fmt.Sprintf("%s:%s → %s:%s (%s)", gid, g.Name, nodeID(g, g.Now), g.Now, dTxt)})
+						} else {
+							rows = append(rows, checkRow{true, T("Chain"), fmt.Sprintf("%s:%s", gid, g.Name)})
 						}
-						fmt.Printf("%-20s %s:%s → %s:%s (%s)\n", T("当前链路"), gid, g.Name, nodeID(g, g.Now), g.Now, dTxt)
-					} else {
-						fmt.Printf("%-20s %s:%s\n", T("当前链路"), gid, g.Name)
 					}
 				}
 			}
+		} else {
+			rows = append(rows, checkRow{true, T("Profile"), T("悬空 (sub unuse)")})
+			if active {
+				rows = append(rows, checkRow{true, T("Core traffic"), T("DIRECT (空配置)")})
+			}
 		}
-		printTimers(s)
+
+		// 顺序固定 Res → Sub → Node (与 doctor 完全一致)
+		rows = append(rows,
+			checkRow{true, T("Res auto-update"), timerText(s.ResourceAutoUpdateEnabled, s.ResourceAutoUpdateInterval)},
+			checkRow{true, T("Sub auto-update"), subTimerText(s)},
+			checkRow{true, T("Node auto-select"), nodeTimerText(s)},
+		)
+
+		ui.TableSections(stdoutWriter(), []string{"", T("项目"), T("值")}, []ui.Section{{Rows: plainToRows(rows)}}, 2)
 		return nil
 	},
 }
 
-// printTimers 打印自动任务状态: sub 悬空时均显示悬空; group 悬空时择优显示悬空
-func printTimers(s *app.Settings) {
-	rsub := func() {
-		if s.Current() == nil {
-			return
-		}
-		last := humanTime(s.Current().UpdatedAt)
-		if s.SubAutoUpdateEnabled {
-			next := remaining(s.Current().UpdatedAt, s.SubAutoUpdateInterval)
-			fmt.Printf("%-20s %s | %s %s | %s %s\n", T("Sub auto-update"),
-				onOff2(s.SubAutoUpdateEnabled), T("上次"), last, T("下次"), next)
-		} else {
-			fmt.Printf("%-20s %s | %s %s\n", T("Sub auto-update"),
-				onOff2(s.SubAutoUpdateEnabled), T("上次"), last)
-		}
-	}
-	rres := func() {
-		last := humanTime(s.ResourceLastRun)
-		if s.ResourceAutoUpdateEnabled {
-			next := remaining(s.ResourceLastRun, s.ResourceAutoUpdateInterval)
-			fmt.Printf("%-20s %s | %s %s | %s %s\n", T("Res auto-update"),
-				onOff2(s.ResourceAutoUpdateEnabled), T("上次"), last, T("下次"), next)
-		} else {
-			fmt.Printf("%-20s %s | %s %s\n", T("Res auto-update"),
-				onOff2(s.ResourceAutoUpdateEnabled), T("上次"), last)
-		}
-	}
-	rnode := func() {
-		if s.Current() == nil {
-			return
-		}
-		if s.CurrentGroup == "" {
-			fmt.Printf("%-20s %s\n", T("Node auto-select"), T("悬空 (group 未选)"))
-			return
-		}
-		last := humanTime(s.AutoSelectLastRun)
-		if s.NodeAutoSelectEnabled {
-			next := remaining(s.AutoSelectLastRun, s.NodeAutoSelectInterval)
-			fmt.Printf("%-20s %s | %s %s | %s %s\n", T("Node auto-select"),
-				onOff2(s.NodeAutoSelectEnabled), T("上次"), last, T("下次"), next)
-		} else {
-			fmt.Printf("%-20s %s | %s %s\n", T("Node auto-select"),
-				onOff2(s.NodeAutoSelectEnabled), T("上次"), last)
-		}
-	}
+// subTimerText 订阅自动更新: 悬空(sub unuse)时如实说明
+func subTimerText(s *app.Settings) string {
 	if s.Current() == nil {
-		fmt.Printf("%-20s %s\n", T("Sub auto-update"), T("悬空 (sub unuse)"))
-		fmt.Printf("%-20s %s\n", T("Node auto-select"), T("悬空 (sub unuse)"))
-		rres()
-		return
+		return T("悬空 (sub unuse)")
 	}
-	rres()
-	rsub()
-	rnode()
+	last := humanTime(s.Current().UpdatedAt)
+	if s.SubAutoUpdateEnabled {
+		return fmt.Sprintf("%s | %s %s | %s %s", T("已启用"), T("上次"), last,
+			T("下次"), remaining(s.Current().UpdatedAt, s.SubAutoUpdateInterval))
+	}
+	return fmt.Sprintf("%s | %s %s", T("已停用"), T("上次"), last)
+}
+
+// nodeTimerText 自动择优: group 未选时显示悬空
+func nodeTimerText(s *app.Settings) string {
+	if s.Current() == nil {
+		return T("悬空 (sub unuse)")
+	}
+	if s.CurrentGroup == "" {
+		return T("悬空 (group 未选)")
+	}
+	if s.NodeAutoSelectEnabled {
+		return fmt.Sprintf("%s | %s %s | %s %s", T("已启用"), T("上次"), humanTime(s.AutoSelectLastRun),
+			T("下次"), remaining(s.AutoSelectLastRun, s.NodeAutoSelectInterval))
+	}
+	return fmt.Sprintf("%s | %s %s", T("已停用"), T("上次"), humanTime(s.AutoSelectLastRun))
 }
 
 func onOff2(b bool) string {
@@ -187,14 +183,12 @@ func remaining(last time.Time, ivl time.Duration) string {
 	if left < 0 {
 		left = 0
 	}
-	h := int(left.Hours())
-	m := int(left.Minutes()) % 60
-	if h > 0 {
-		return fmt.Sprintf("%dh%dm", h, m)
-	}
-	return fmt.Sprintf("%dm", m)
+	return cfg.DurHuman(time.Duration(int(left.Minutes())) * time.Minute) // 剩余时间截断到分钟
 }
 
 func init() {
+	for _, c := range []*cobra.Command{startCmd, stopCmd, restartCmd} {
+		markMutating(c)
+	}
 	rootCmd.AddCommand(startCmd, stopCmd, restartCmd, statusCmd)
 }

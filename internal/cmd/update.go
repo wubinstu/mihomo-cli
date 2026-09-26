@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"archive/tar"
 	"compress/gzip"
 	"encoding/json"
 	"fmt"
@@ -11,7 +12,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"archive/tar"
 
 	"github.com/spf13/cobra"
 

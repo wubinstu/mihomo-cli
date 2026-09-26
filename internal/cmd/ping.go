@@ -72,7 +72,7 @@ var pingCmd = &cobra.Command{
 			}
 			sites = sel
 		}
-		proxyAddr := fmt.Sprintf("http://127.0.0.1:%d", s.MixedPort)
+		proxyAddr := fmt.Sprintf("http://127.0.0.1:%d", s.ProxyPort())
 		tr := &http.Transport{
 			Proxy:           http.ProxyURL(mustParseURL(proxyAddr)),
 			TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12},

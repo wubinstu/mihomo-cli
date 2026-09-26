@@ -2,760 +2,706 @@ package cmd
 
 import (
 	"fmt"
-	"net/http"
 	"os"
-	"strconv"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
-	"gopkg.in/yaml.v3"
 
 	"github.com/wubinstu/mihomo-cli/internal/api"
 	"github.com/wubinstu/mihomo-cli/internal/app"
+	"github.com/wubinstu/mihomo-cli/internal/cfg"
 	"github.com/wubinstu/mihomo-cli/internal/i18n"
 	"github.com/wubinstu/mihomo-cli/internal/render"
-	"github.com/wubinstu/mihomo-cli/internal/subs"
 	"github.com/wubinstu/mihomo-cli/internal/sysd"
 	"github.com/wubinstu/mihomo-cli/internal/ui"
 )
 
-// configCmd 配置管理: config.toml 由程序管理, 禁止手动编辑 (文件头有警告)
+// configCmd 配置管理。config.toml 由程序管理, 禁止手动编辑 (文件头有警告);
+// 它是唯一权威, render 时合成 runtime/config.yaml, 再由内核加载。
 var configCmd = &cobra.Command{
 	Use:   "config",
-	Short: T("配置管理: get/set/reset-default/sync"),
+	Short: T("配置管理: get/set/reset-default/unset/update-file/update-service"),
 	Long: T("配置文件 /etc/mihomo-cli/config.toml 由 mihomo-cli 管理与运行时回写, 请勿手动编辑;") + "\n" +
-		T("手动改动后请执行 config sync update-service 以配置文件覆盖运行中的服务。"),
+		T("手动改动后执行 config update-service 以配置文件覆盖运行中的服务;") + "\n" +
+		T("撤销某个键的接管用 config unset <key>。") + "\n\n" +
+		T("点号路径可读写内核任意配置段:") + "\n" +
+		"  mihomo-cli config set tun.enable true\n" +
+		"  mihomo-cli config set dns.fake-ip-range 28.0.0.1/8\n" +
+		"  mihomo-cli config set dns.nameserver 223.5.5.5,119.29.29.29",
 }
 
 // ---- get ----
 
-type cfgEntry struct{ cat, key string }
-
-// configKeys 分类键表 (get 展示 / set 校验 / 补全)
-// configDefaults 有默认值的配置项
-var configDefaults = map[string]string{
-	"allow-lan": "false", "mixed-port": "7890", "socks-port": "/", "http-port": "/",
-	"proxy-mode": "rule", "ipv6-enabled": "false", "log-level": "info",
-	"cli-language": "auto", "github-mirror": "auto",
-	"test-url": "https://www.gstatic.com/generate_204", "test-timeout": "5000ms",
-	"sub-auto-update-enabled": "true", "sub-auto-update-interval": "24h",
-	"node-auto-select-enabled": "false", "node-auto-select-interval": "30m",
-	"resource-auto-update-enabled": "false", "resource-auto-update-interval": "24h",
-}
-
-var configKeys = []cfgEntry{
-	{"core", "allow-lan"}, {"core", "mixed-port"}, {"core", "socks-port"}, {"core", "http-port"}, {"core", "proxy-mode"},
-	{"core", "ipv6-enabled"}, {"core", "log-level"},
-	{"core", "tcp-concurrent"}, {"core", "unified-delay"}, {"core", "keep-alive-interval"},
-	{"cli", "cli-language"}, {"cli", "github-mirror"},
-	{"cli", "test-url"}, {"cli", "test-timeout"},
-	{"cli", "current-profile"}, {"cli", "current-group"},
-	{"timer", "sub-auto-update-enabled"}, {"timer", "sub-auto-update-interval"},
-	{"timer", "node-auto-select-enabled"}, {"timer", "node-auto-select-interval"},
-	{"timer", "resource-auto-update-enabled"}, {"timer", "resource-auto-update-interval"},
-}
-
-func configValue(s *app.Settings, key string) string {
-	switch key {
-	case "allow-lan":
-		return fmt.Sprintf("%v", s.AllowLan)
-	case "mixed-port":
-		return fmt.Sprintf("%d", s.MixedPort)
-	case "socks-port":
-		return portOrUnset(s.SocksPort)
-	case "http-port":
-		return portOrUnset(s.HTTPPort)
-	case "proxy-mode":
-		if s.ProxyMode == "" {
-			return "rule (sub default)"
-		}
-		return s.ProxyMode
-	case "ipv6-enabled":
-		return fmt.Sprintf("%v", s.IPV6Enabled)
-	case "log-level":
-		if s.LogLevel == "" {
-			return "info (default)"
-		}
-		return s.LogLevel
-	case "cli-language":
-		if s.CLILanguage == "" {
-			return i18n.Lang() + " (auto)"
-		}
-		return s.CLILanguage
-	case "github-mirror":
-		return orDash2(s.GithubMirror)
-	case "test-url":
-		return s.TestURL
-	case "test-timeout":
-		return fmt.Sprintf("%dms", s.TestTimeout)
-	case "current-profile":
-		return orDash2(s.CurrentProfile)
-	case "current-group":
-		return orDash2(s.CurrentGroup)
-	case "tcp-concurrent":
-		return triBool(s.TCPConcurrent)
-	case "unified-delay":
-		return triBool(s.UnifiedDelay)
-	case "keep-alive-interval":
-		if s.KeepAliveInterval == nil {
-			return T("跟随订阅")
-		}
-		return fmt.Sprintf("%ds", *s.KeepAliveInterval)
-	case "sub-auto-update-enabled":
-		return fmt.Sprintf("%v", s.SubAutoUpdateEnabled)
-	case "sub-auto-update-interval":
-		return s.SubAutoUpdateInterval.String()
-	case "node-auto-select-enabled":
-		return fmt.Sprintf("%v", s.NodeAutoSelectEnabled)
-	case "node-auto-select-interval":
-		return s.NodeAutoSelectInterval.String()
-	case "resource-auto-update-enabled":
-		return fmt.Sprintf("%v", s.ResourceAutoUpdateEnabled)
-	case "resource-auto-update-interval":
-		return s.ResourceAutoUpdateInterval.String()
-	}
-	return "?"
-}
-
-func triBool(p *bool) string {
-	if p == nil {
-		return T("跟随订阅")
-	}
-	return fmt.Sprintf("%v", *p)
-}
-
-func portOrUnset(n int) string {
-	if n == 0 {
-		return T("未设置")
-	}
-	return fmt.Sprintf("%d", n)
-}
-
-// subParamDefault 从订阅原文读取参数默认值: "(sub: true)" / "(sub: none)"
-func subParamDefault(key string, kind string) string {
-	v := subYAMLKey(key)
-	switch kind {
-	case "bool":
-		if v == "" {
-			return "(sub: none)"
-		}
-		return "(sub: " + v + ")"
-	case "int":
-		if v == "" {
-			return "(sub: none)"
-		}
-		return "(sub: " + v + ")"
-	}
-	return "(sub: none)"
-}
-
-func orDash2(s string) string {
-	if s == "" {
-		return "-"
-	}
-	return s
-}
-
 var configGetCmd = &cobra.Command{
-	Use:   "get [key]",
-	Short: T("查看配置 (无参数 = 全部, 按类别分组)"),
+	Use:   "get [key|section]",
+	Short: T("查看配置 (无参数 = 全部, 一张表显示 默认值/设置值/运行值)"),
 	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		s := mustSettings()
+		live := cfg.Fetch(s)
 		if len(args) == 1 {
-			for _, e := range configKeys {
-				if e.key == args[0] {
-					fmt.Println(configValue(s, e.key))
-					return nil
-				}
+			arg := args[0]
+			if k := cfg.Lookup(arg); k != nil {
+				fmt.Println(k.Get(s))
+				return nil
 			}
-			return fmt.Errorf("%s %q", T("未知配置项"), args[0])
+			// 段
+			if isSection(arg) {
+				printConfigSections(s, live, []string{arg})
+				printSectionHint(arg)
+				return nil
+			}
+			// 未注册的点号路径 (通用键)
+			if v, ok := cfg.GetGeneric(s, arg); ok {
+				fmt.Println(v)
+				return nil
+			}
+			return fmt.Errorf("%s %q (mihomo-cli config get --help)", T("未知配置项"), arg)
 		}
-		// 每类一张表, 三列宽度跨表统一对齐
-		cat := ""
-		type r3 struct{ k, v, d string }
-		var all []r3
-		for _, e := range configKeys {
-			def := configDefaults[e.key]
-			switch e.key {
-			case "tcp-concurrent", "unified-delay":
-				def = subParamDefault(e.key, "bool")
-			case "keep-alive-interval":
-				def = subParamDefault(e.key, "int")
-			}
-			if def == "" {
-				def = "/"
-			}
-			all = append(all, r3{e.key, configValue(s, e.key), def})
-		}
-		kw, vw, dw := 3, 5, 7
-		for _, r := range all {
-			for i, w := range []int{ui.Width(r.k), ui.Width(r.v), ui.Width(r.d)} {
-				switch i {
-				case 0:
-					if w > kw {
-						kw = w
-					}
-				case 1:
-					if w > vw {
-						vw = w
-					}
-				default:
-					if w > dw {
-						dw = w
-					}
-				}
+		sections := []string{"core", "cli", "timer"}
+		for _, sec := range cfg.UsedSections(s) {
+			if !contains(sections, sec) {
+				sections = append(sections, sec)
 			}
 		}
-		for i, e := range configKeys {
-			if e.cat != cat {
-				cat = e.cat
-				if i > 0 {
-					fmt.Println()
-				}
-				fmt.Printf("%-*s  %-*s  %s\n", kw, "KEY ("+configCatName(cat)+")", vw, "VALUE", "DEFAULT")
-				fmt.Printf("%s  %s  %s\n", strings.Repeat("-", kw), strings.Repeat("-", vw), strings.Repeat("-", dw))
-			}
-			r := all[i]
-			fmt.Printf("%-*s  %-*s  %s\n", kw, r.k, vw, r.v, r.d)
-		}
+		printConfigSections(s, live, sections)
+		printSectionHint("")
 		return nil
 	},
 }
 
-func configCatName(c string) string {
-	switch c {
-	case "core":
-		return "core config"
-	case "cli":
-		return "cli"
-	case "timer":
-		return "systemd timers"
+func contains(list []string, s string) bool {
+	for _, v := range list {
+		if v == s {
+			return true
+		}
 	}
-	return c
+	return false
+}
+
+func isSection(name string) bool {
+	for _, k := range cfg.Keys {
+		if k.Section == name {
+			return true
+		}
+	}
+	return false
+}
+
+// printConfigSections 一张表打印多个配置段 (列宽跨段统一)
+func printConfigSections(s *app.Settings, live *cfg.Live, sections []string) {
+	secs := []ui.Section{}
+	diff := []string{}
+	for _, sec := range sections {
+		rows := [][]string{}
+		for _, k := range cfg.KeysOf(sec) {
+			setting := k.Effective(s)
+			def := k.Def
+			if def == "" {
+				def = "/"
+			}
+			run := live.Value(k)
+			state := "-"
+			if run != "-" {
+				if live.Same(k, setting) {
+					state = ui.Paint("\x1b[32m", okWord(true))
+				} else {
+					state = ui.Paint("\x1b[31m", okWord(false))
+					diff = append(diff, k.Name)
+				}
+			}
+			rows = append(rows, []string{k.Name, run, setting, def, state})
+		}
+		if len(rows) == 0 {
+			continue
+		}
+		secs = append(secs, ui.Section{Title: "[" + cfg.SectionTitles(sec) + "]", Rows: rows})
+	}
+	if len(secs) == 0 {
+		fmt.Println(T("无配置项"))
+		return
+	}
+	ui.TableSections(os.Stdout, []string{"KEY", T("运行值"), T("设置值"), T("默认值"), T("状态")}, secs, 2)
+	if len(diff) > 0 {
+		fmt.Printf("%s\n", T("提示: 与运行态不同的项")+": "+strings.Join(diff, ", ")+" — "+T("用 config update-service 以配置文件覆盖, config update-file 以运行值覆盖"))
+	}
+	if !live.Running() {
+		fmt.Printf("%s\n", T("服务未运行, 运行值与状态列不可用 (mihomo-cli start)"))
+	}
+}
+
+// printSectionHint 提示还有哪些可用段 (未使用时不占用表格)
+func printSectionHint(shown string) {
+	var avail []string
+	for _, sec := range []string{"dns", "tun"} {
+		if sec == shown {
+			continue
+		}
+		avail = append(avail, "config get "+sec)
+	}
+	if shown != "" {
+		return
+	}
+	if len(avail) > 0 {
+		fmt.Printf("%s: %s\n", T("其他配置段(未使用时隐藏)"), strings.Join(avail, " | "))
+	}
 }
 
 // ---- set ----
 
 var configSetCmd = &cobra.Command{
 	Use:   "set <key> <value>",
-	Short: T("修改配置并生效"),
-	Long: `-- ` + T("内核 (config.yaml)") + ` --
-allow-lan <true|false>                    ` + T("允许局域网设备使用代理 (0.0.0.0)") + `
-mixed-port <port>                         ` + T("混合代理端口 (http+socks5)") + ", " + T("默认 7890") + `
-proxy-mode <rule|global|direct>           ` + T("代理模式 (热切换)") + `
-ipv6-enabled <true|false>                 ` + T("启用 IPv6") + `
-log-level <debug|info|warning|error|silent>   ` + T("内核日志等级") + `
-tcp-concurrent <true|false>               ` + T("TCP 并发连接") + `
-unified-delay <true|false>                ` + T("统一延迟计算 (URL-Test 更精准)") + `
-keep-alive-interval <1-600>               ` + T("长连接保活间隔 (秒)") + `
-
--- ` + T("cli 自身") + ` --
-cli-language <zh|en>                      ` + T("输出语言 (默认按系统 locale, 回退中文)") + `
-github-mirror <url>                       ` + T("GitHub 镜像站前缀 (空=自动尝试)") + `
-test-url <url> / test-timeout <ms>        ` + T("测速 URL / 超时") + `
-
--- ` + T("定时任务 (systemd)") + ` --
-sub-auto-update-enabled <bool>            ` + T("订阅定时自动更新") + `
-sub-auto-update-interval <dur>            ` + T("订阅自动更新周期") + ", " + T("如 12h / 30m") + `
-node-auto-select-enabled <bool>           ` + T("定时对当前分组自动择优") + `
-node-auto-select-interval <dur>           ` + T("自动择优周期") + ", " + T("如 15m") + `
-resource-auto-update-enabled <bool>       ` + T("定时更新 geo 资源 (mmdb/asn/geoip/geosite)") + `
-resource-auto-update-interval <dur>       ` + T("资源更新周期") + ", " + T("如 12h"),
-	Args: cobra.RangeArgs(0, 2),
+	Short: T("修改配置并生效 (有校验, 非法值拒绝写入)"),
+	Args:  cobra.RangeArgs(0, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 {
 			return cmd.Help()
 		}
-		k := args[0]
 		if len(args) == 1 {
-			return configKeyHelp(k)
+			return configKeyHelp(args[0])
 		}
 		s := mustSettings()
-		v := args[1]
-		b := func() bool {
-			return v == "true" || v == "on" || v == "yes" || v == "1"
-		}
-		switch k {
-		case "cli-language":
-			if v == "auto" {
-				s.CLILanguage = ""
-				v = "auto"
-			} else if v != "zh" && v != "en" {
-				return fmt.Errorf("%s: auto|zh|en", T("无效值"))
-			} else {
-				s.CLILanguage = v
-				i18n.Set(v)
-			}
-		case "allow-lan":
-			s.AllowLan = b()
-		case "mixed-port", "socks-port", "http-port":
-			if v == "none" || v == "-" {
-				v = "0"
-			}
-			n, err := strconv.Atoi(v)
-			if err != nil || n < 0 || n > 65535 {
-				return fmt.Errorf("%s", T("无效端口"))
-			}
-			switch k {
-			case "mixed-port":
-				s.MixedPort = n
-			case "socks-port":
-				s.SocksPort = n
-			case "http-port":
-				s.HTTPPort = n
-			}
-		case "proxy-mode":
-			if v != "rule" && v != "global" && v != "direct" {
-				return fmt.Errorf("%s", T("proxy-mode 仅支持 rule / global / direct"))
-			}
-			s.ProxyMode = v
-		case "ipv6-enabled":
-			s.IPV6Enabled = b()
-		case "log-level":
-			switch v {
-			case "debug", "info", "warning", "error", "silent":
-			default:
-				return fmt.Errorf("%s: debug/info/warning/error/silent", T("无效日志等级"))
-			}
-			s.LogLevel = v
-		case "github-mirror":
-			if v == "auto" {
-				s.GithubMirror = ""
-				v = "auto"
-			} else {
-				s.GithubMirror = v
-			}
-		case "tcp-concurrent":
-			bv := b()
-			s.TCPConcurrent = &bv
-		case "unified-delay":
-			bv := b()
-			s.UnifiedDelay = &bv
-		case "keep-alive-interval":
-			n, err := strconv.Atoi(v)
-			if err != nil || n < 1 || n > 600 {
-				return fmt.Errorf("%s (1-600)", T("无效保活间隔"))
-			}
-			s.KeepAliveInterval = &n
-		case "resource-auto-update-enabled":
-			s.ResourceAutoUpdateEnabled = b()
-		case "resource-auto-update-interval":
-			d, err := time.ParseDuration(v)
-			if err != nil || d < time.Hour {
-				return fmt.Errorf("%s (>=1h)", T("无效周期"))
-			}
-			s.ResourceAutoUpdateInterval = d
-		case "sub-auto-update-enabled":
-			s.SubAutoUpdateEnabled = b()
-		case "sub-auto-update-interval":
-			d, err := time.ParseDuration(v)
-			if err != nil || d < time.Minute {
-				return fmt.Errorf("%s", T("无效周期 (>=1m), 如 12h"))
-			}
-			s.SubAutoUpdateInterval = d
-		case "node-auto-select-enabled":
-			s.NodeAutoSelectEnabled = b()
-		case "node-auto-select-interval":
-			d, err := time.ParseDuration(v)
-			if err != nil || d < time.Minute {
-				return fmt.Errorf("%s", T("无效周期 (>=1m), 如 15m"))
-			}
-			s.NodeAutoSelectInterval = d
-		case "test-url":
-			s.TestURL = v
-		case "test-timeout":
-			n, err := strconv.Atoi(v)
-			if err != nil || n < 100 {
-				return fmt.Errorf("%s", T("无效超时"))
-			}
-			s.TestTimeout = n
-		default:
-			return fmt.Errorf("%s %q (mihomo-cli config set --help)", T("未知配置项"), k)
+		return configSet(s, args[0], args[1])
+	},
+}
+
+// configSet 校验 → 写入 → 生效
+func configSet(s *app.Settings, key, value string) error {
+	k := cfg.Lookup(key)
+	if k == nil {
+		// 通用键: 未注册的任意 yaml 路径
+		if err := cfg.SetGeneric(s, key, value); err != nil {
+			return badValue(key, value, T("任意 yaml 路径"), T("值按字面推断类型: true/false/数字/逗号列表/字符串"))
 		}
 		if err := s.Save(); err != nil {
 			return err
 		}
-		fmt.Printf("%s = %s %s\n", k, v, T("已保存"))
-		// 轻量项仅 PATCH, 不整文件 reload
-		if k == "proxy-mode" && sysd.IsActive() {
-			if err := api.New(s).SetMode(v); err != nil {
-				return err
-			}
-			fmt.Println(T("已热切换"))
-			return nil
-		}
-		if k == "log-level" && sysd.IsActive() {
-			if err := api.New(s).PatchConfig(map[string]any{"log-level": v}); err != nil {
-				fmt.Fprintf(os.Stderr, "%s: %v\n", T("警告: 热重载失败"), err)
-			} else {
-				fmt.Println(T("已热切换"))
-				if s.Current() != nil {
-					_ = render.Generate(s) // 同步 runtime 文件 (不再 reload)
-				}
-			}
-			return nil
-		}
-		// 重建运行配置 + 定时器 + 热重载
-		if s.Current() != nil {
-			if err := render.Generate(s); err == nil {
-				reloadIfActive(s)
-			}
-		}
-		if err := sysd.InstallTimers(s); err != nil {
-			fmt.Fprintf(os.Stderr, "%s: %v\n", T("警告: 更新定时器失败"), err)
-		}
-		return nil
-	},
+		fmt.Printf("%s = %s %s\n", key, value, T("已保存"))
+		return applyConfig(s, nil)
+	}
+	canon, err := k.Parse(value)
+	if err != nil {
+		return badValue(key, value, k.Expected(), legalValues(k))
+	}
+	if err := k.Set(s, canon); err != nil {
+		return badValue(key, value, k.Expected(), legalValues(k))
+	}
+	if err := s.Save(); err != nil {
+		return err
+	}
+	fmt.Printf("%s = %s %s\n", key, canon, T("已保存"))
+	if k.Name == "cli-language" && canon != "auto" {
+		i18n.Set(canon)
+	}
+	if k.Name == "github-mirror" {
+		_ = render.Generate(s)
+	}
+	return applyConfig(s, k)
 }
 
-// configKeyHelp 单键详情
-func configKeyHelp(k string) error {
-	for _, e := range configKeys {
-		if e.key == k {
-			s := mustSettings()
-			fmt.Printf("[%s] %s\n  %s: %s\n  %s: %s\n",
-				configCatName(e.cat), k,
-				T("当前值"), configValue(s, k),
-				T("用法"), "mihomo-cli config set "+k+" <"+T("值")+">")
+// badValue L1 校验失败: 拒绝写入, 并把"改哪个键/填什么"说清楚
+func badValue(key, value, expected, legal string) error {
+	return fmt.Errorf("%s\n  %s: %s\n  %s: %q\n  %s: %s\n  %s: %s",
+		T("无效值, 已拒绝写入"),
+		T("配置项"), key,
+		T("填入"), value,
+		T("期望"), expected,
+		T("合法值"), legal)
+}
+
+func legalValues(k *cfg.Key) string {
+	if len(k.Enum) > 0 {
+		return strings.Join(k.Enum, " | ")
+	}
+	return k.Expected()
+}
+
+// applyConfig 让运行态跟上 config.toml
+func applyConfig(s *app.Settings, k *cfg.Key) error {
+	if k != nil {
+		if k.Top() == "tun" {
+			if err := ensureTunReady(s, k); err != nil {
+				return err
+			}
+		}
+		if k.Section == "timer" {
+			if err := sysd.InstallTimers(s); err != nil {
+				fmt.Fprintf(os.Stderr, "%s: %v\n", T("警告: 更新定时器失败"), err)
+			} else {
+				fmt.Println(T("定时任务已更新"))
+			}
 			return nil
 		}
 	}
-	return fmt.Errorf("%s %q", T("未知配置项"), k)
+	active := sysd.IsActive()
+	if k != nil && cfg.HotPatchable(*k) && active {
+		if err := api.New(s).PatchConfig(map[string]any{cfg.YAMLPath(k.Name): canonForPatch(s, k)}); err != nil {
+			fmt.Fprintf(os.Stderr, "%s: %v\n", T("警告: 热切换失败"), err)
+			return renderAndApply(s, k)
+		}
+		fmt.Println(T("已热切换"))
+		return nil
+	}
+	return renderAndApply(s, k)
+}
+
+// canonForPatch PATCH 用的值 (sub = 不下发)
+func canonForPatch(s *app.Settings, k *cfg.Key) any {
+	v := k.Get(s)
+	if v == "sub" || v == "" {
+		return nil
+	}
+	if k.Kind == cfg.KindBool {
+		return v == "true"
+	}
+	return v
+}
+
+// renderAndApply 重渲染运行配置并 reload/restart; 渲染失败只警告不覆盖"已保存"的事实
+func renderAndApply(s *app.Settings, k *cfg.Key) error {
+	if err := render.Generate(s); err != nil {
+		fmt.Fprintf(os.Stderr, "%s: %v\n", T("警告: 已保存但暂时无法生效"), err)
+		return nil
+	}
+	if !sysd.IsActive() {
+		fmt.Println(T("服务未运行, 已跳过热重载 (mihomo-cli start)"))
+		return nil
+	}
+	if k != nil && k.Restart {
+		// 端口/TUN 这类需要重启的键: 先试 reload —— reload 不会打断已有连接,
+		// 也不会因为「上一个实例还没释放端口」而 fatal 崩溃循环。
+		if reloadAndVerify(s, k) {
+			fmt.Println(T("已热重载配置"))
+			return nil
+		}
+		if err := sysd.Service("restart"); err != nil {
+			return err
+		}
+		if !serviceUpSoon() {
+			fmt.Fprintf(os.Stderr, "%s\n  %s\n  %s\n",
+				T("警告: 服务重启后未就绪, 请执行 mihomo-cli log 查看原因"),
+				T("如需恢复原值: mihomo-cli config update-service <key>"),
+				T("原配置备份在 /etc/mihomo-cli/config.toml.pre-1.3.bak"))
+			return nil
+		}
+		fmt.Println(T("已重启服务使配置生效"))
+		return nil
+	}
+	if err := api.New(s).Reload(app.RuntimeConfig); err != nil {
+		fmt.Fprintf(os.Stderr, "%s: %v %s\n", T("警告: 热重载失败"), err, T("(可执行 mihomo-cli restart)"))
+		return nil
+	}
+	fmt.Println(T("已热重载配置"))
+	return nil
+}
+
+// reloadAndVerify reload 后验证运行态是否真的跟上了设置值
+func reloadAndVerify(s *app.Settings, k *cfg.Key) bool {
+	if err := api.New(s).Reload(app.RuntimeConfig); err != nil {
+		return false
+	}
+	for i := 0; i < 10; i++ {
+		live := cfg.Fetch(s)
+		if live.Running() && live.Same(*k, k.Effective(s)) {
+			return true
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	return false
+}
+
+// serviceUpSoon 等待服务进入 running (最多 ~5s)
+func serviceUpSoon() bool {
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if sysd.IsActive() {
+			return true
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	return sysd.IsActive()
 }
 
 // ---- reset-default ----
 
 var configResetCmd = &cobra.Command{
-	Use:   "reset-default [key|all]",
+	Use:   "reset-default [key]",
 	Short: T("恢复默认值 (仅对有默认值的配置项生效)"),
+	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		s := mustSettings()
-		target := "all"
+		targets := cfg.Keys
 		if len(args) == 1 {
-			target = args[0]
-		}
-		reset := func(k string) bool {
-			switch k {
-			case "allow-lan":
-				s.AllowLan = false
-			case "mixed-port":
-				s.MixedPort = 7890
-			case "proxy-mode", "log-level":
-				// 空 = 跟随订阅
-			case "ipv6-enabled":
-				s.IPV6Enabled = false
-			case "sub-auto-update-enabled":
-				s.SubAutoUpdateEnabled = true
-			case "sub-auto-update-interval":
-				s.SubAutoUpdateInterval = 24 * time.Hour
-			case "node-auto-select-enabled":
-				s.NodeAutoSelectEnabled = false
-			case "node-auto-select-interval":
-				s.NodeAutoSelectInterval = 30 * time.Minute
-			case "test-url":
-				s.TestURL = "https://www.gstatic.com/generate_204"
-			case "test-timeout":
-				s.TestTimeout = 5000
-			default:
-				return false
+			k := cfg.Lookup(args[0])
+			if k == nil {
+				return fmt.Errorf("%s %q", T("未知配置项"), args[0])
 			}
-			fmt.Printf("%s -> %s\n", k, T("默认值"))
-			return true
+			targets = []cfg.Key{*k}
 		}
-		if target == "all" {
-			for _, e := range configKeys {
-				reset(e.key)
+		var reset []string
+		for _, k := range targets {
+			if k.Def == "" {
+				continue
 			}
-		} else if !reset(target) {
-			return fmt.Errorf("%s %q (%s)", T("该项无默认值或不存在"), target, "reset-default all")
+			if k.Kind == cfg.KindState {
+				continue
+			}
+			if err := k.Set(s, k.Def); err != nil {
+				continue
+			}
+			reset = append(reset, k.Name+" → "+k.Def)
+		}
+		if len(reset) == 0 {
+			return fmt.Errorf("%s", T("没有可恢复默认值的配置项"))
 		}
 		if err := s.Save(); err != nil {
 			return err
 		}
-		if s.Current() != nil {
-			if err := render.Generate(s); err == nil {
-				reloadIfActive(s)
+		for _, r := range reset {
+			fmt.Println(r)
+		}
+		if len(args) == 1 {
+			return applyConfig(s, cfg.Lookup(args[0]))
+		}
+		// 全部重置: 端口/模式等都需要重新渲染
+		_ = render.Generate(s)
+		if sysd.IsActive() {
+			_ = sysd.Service("restart")
+			fmt.Println(T("已重启服务使配置生效"))
+		}
+		return sysd.InstallTimersQuiet(s)
+	},
+}
+
+// ---- unset: 撤销对某个键的接管 (点号路径键回到"跟随订阅") ----
+
+var configUnsetCmd = &cobra.Command{
+	Use:   "unset <key...>",
+	Short: T("撤销接管: 该键回到跟随订阅/内核默认"),
+	Long: T("点号路径键 (tun.* / dns.*) 用 unset 撤销, 该段就不再写进内核 yaml, 订阅原样保留;") + "\n" +
+		T("扁平键 (mixed-port 等) 的 unset 等于设置为 sub (跟随订阅), 无默认值的键则清空。"),
+	Args: cobra.MinimumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		s := mustSettings()
+		for _, name := range args {
+			k := cfg.Lookup(name)
+			if k == nil {
+				// 通用键: 直接从 overrides 删除
+				if err := cfg.SetGeneric(s, name, "sub"); err != nil {
+					return err
+				}
+				_ = cfg.DeleteGeneric(s, name)
+				fmt.Printf("%s %s\n", name, T("已撤销"))
+				continue
+			}
+			if k.Top() != "" {
+				if err := cfg.DeleteSectionKey(s, name); err != nil {
+					return err
+				}
+			} else if k.Def != "" {
+				_ = k.Set(s, "sub")
+			} else {
+				_ = k.Set(s, "")
+			}
+			fmt.Printf("%s %s\n", name, T("已撤销"))
+		}
+		if err := s.Save(); err != nil {
+			return err
+		}
+		for _, name := range args {
+			if k := cfg.Lookup(name); k != nil {
+				_ = applyConfig(s, k)
 			}
 		}
 		return nil
 	},
 }
 
-// ---- sync ----
+// ---- update-file / update-service ----
 
-var configSyncCmd = &cobra.Command{
-	Use:   "sync [update-file|update-service] [key...]",
-	Short: T("配置一致性: 检查/以文件覆盖服务/以运行状态覆盖文件"),
-	Long: T("配置以 config.toml 为唯一权威; sync 检测文件(渲染后的 runtime 配置)与内核运行状态的差异。") + `
-mihomo-cli config sync                # ` + T("三列对比: 文件值 / 运行值 / 一致性") + `
-mihomo-cli config sync update-file [key...]    # ` + T("用内核运行状态覆盖配置文件 (可指定键)") + `
-mihomo-cli config sync update-service [key...] # ` + T("用配置文件覆盖服务 (可指定键; 整体重启)"),
+var configUpdateFileCmd = &cobra.Command{
+	Use:   "update-file [key...]",
+	Short: T("用运行态覆盖 config.toml (可指定键, 兜底手段)"),
+	Long: T("把内核当前运行值/定时器实际状态写回 config.toml, 然后重渲染运行配置。") + "\n" +
+		T("适用于: 手动改过 runtime/config.yaml 或被别人 systemctl 改过 timer 之后, 让文件追上现实。"),
 	Args: cobra.ArbitraryArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		s := mustSettings()
-		mode := ""
-		var keys []string
-		if len(args) > 0 && (args[0] == "update-file" || args[0] == "update-service") {
-			mode = args[0]
-			keys = args[1:]
+		live := cfg.Fetch(s)
+		if !live.Running() {
+			return fmt.Errorf("%s", T("服务未运行, 没有运行态可读取"))
 		}
-		live := liveCoreConfig(s)
-		fileVals := syncFileValues(s)
-
-		if mode == "update-service" {
-			if len(keys) > 0 {
-				return fmt.Errorf("%s", T("按键覆盖服务暂不支持, 请整体 update-service"))
+		keys, err := resolveKeys(args)
+		if err != nil {
+			return err
+		}
+		changed, failed := 0, 0
+		for _, k := range keys {
+			v, err := live.Pull(k)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%s: %v\n", k.Name, err)
+				failed++
+				continue
 			}
-			if err := render.Generate(s); err != nil {
-				return err
+			if k.Kind == cfg.KindBool && k.Section == "timer" {
+				// enabled/disabled → true/false
+				v = strings.TrimSuffix(v, "d") // "enabled"→"enable"? 不行, 显式映射
+				if v == "enable" {
+					v = "true"
+				} else {
+					v = "false"
+				}
 			}
-			if err := sysd.Service("restart"); err != nil {
-				return err
+			if canon, perr := k.Parse(v); perr == nil {
+				v = canon
 			}
-			fmt.Println(T("已用配置文件重启服务"))
+			old := k.Effective(s)
+			if old == v {
+				continue
+			}
+			if err := k.Set(s, v); err != nil {
+				fmt.Fprintf(os.Stderr, "%s: %v\n", k.Name, err)
+				continue
+			}
+			fmt.Printf("%s: %s → %s\n", k.Name, orDash(old), v)
+			changed++
+		}
+		if changed == 0 {
+			if failed > 0 {
+				return fmt.Errorf("%s", T("没有可回写的运行值(内核 API 未就绪?)"))
+			}
+			fmt.Println(T("配置文件与运行态一致, 无需更新"))
 			return nil
 		}
-		if mode == "update-file" {
-			// 仅把指定(或全部)可回写键从内核运行状态写回文件
-			apply := func(k string) {
-				switch k {
-				case "proxy-mode":
-					s.ProxyMode = live["proxy-mode"]
-				case "log-level":
-					s.LogLevel = live["log-level"]
-				case "allow-lan":
-					s.AllowLan = live["allow-lan"] == "true"
-				case "ipv6-enabled":
-					s.IPV6Enabled = live["ipv6-enabled"] == "true"
-				case "mixed-port":
-					if n, err := strconv.Atoi(live["mixed-port"]); err == nil && n > 0 {
-						s.MixedPort = n
-					}
-				}
-			}
-			if len(keys) > 0 {
-				for _, k := range keys {
-					apply(k)
-					fmt.Printf("%s <- %s\n", k, live[k])
-				}
-			} else {
-				for k := range fileVals {
-					apply(k)
-				}
-			}
-			if err := s.Save(); err != nil {
-				return err
-			}
-			fmt.Println(T("已用内核运行状态覆盖配置文件"))
-			return nil
+		if err := s.Save(); err != nil {
+			return err
 		}
+		if err := render.Generate(s); err != nil {
+			return err
+		}
+		return sysd.InstallTimersQuiet(s)
+	},
+}
 
-		// 三列对比: 文件 / 运行 / 结果(绿同红异)
-		rows := [][]string{{"KEY", T("配置文件"), T("内核运行"), T("比对")}}
-		same, diff := 0, 0
-		for _, k := range []string{"proxy-mode", "mixed-port", "socks-port", "http-port", "allow-lan", "ipv6-enabled", "log-level", "tcp-concurrent", "unified-delay", "keep-alive-interval"} {
-			fv, lv := fileVals[k], live[k]
-			mark := "\x1b[32m" + T("一致") + "\x1b[0m"
-			if fv != lv {
-				mark = "\x1b[31m" + T("不同") + "\x1b[0m"
-				diff++
-			} else {
-				same++
+var configUpdateServiceCmd = &cobra.Command{
+	Use:   "update-service [key...]",
+	Short: T("用 config.toml 覆盖运行态 (可指定键, 兜底手段)"),
+	Long: T("按 config.toml 重渲染运行配置并让内核/定时器跟上; 端口等需要重启的键会自动重启服务。") + "\n" +
+		T("适用于: 手动编辑过 config.toml, 或改完没生效。"),
+	Args: cobra.ArbitraryArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		s := mustSettings()
+		keys, err := resolveKeys(args)
+		if err != nil {
+			return err
+		}
+		if err := render.Generate(s); err != nil {
+			return err
+		}
+		needRestart := false
+		for _, k := range keys {
+			if k.Restart || k.Section == "timer" {
+				needRestart = true
 			}
-			rows = append(rows, []string{k, fv, lv, mark})
 		}
-		ui.Table(os.Stdout, rows, 2)
-		// timers: 文件设置 vs systemd 实际状态
-		fmt.Println()
-		trows := [][]string{{"KEY", T("配置文件"), "systemd", T("比对")}}
-		for _, t := range []struct{ key, unit string; want bool }{
-			{"sub-auto-update-enabled", "mihomo-cli-sub.timer", s.SubAutoUpdateEnabled},
-			{"node-auto-select-enabled", "mihomo-cli-auto.timer", s.NodeAutoSelectEnabled},
-			{"resource-auto-update-enabled", "mihomo-cli-resource.timer", s.ResourceAutoUpdateEnabled},
-		} {
-			got := sysd.TimerEnabled(t.unit)
-			mark := "\x1b[32m" + T("一致") + "\x1b[0m"
-			if got != t.want {
-				mark = "\x1b[31m" + T("不同") + "\x1b[0m"
-				diff++
-			} else {
-				same++
+		if needRestart {
+			if err := sysd.InstallTimers(s); err != nil {
+				fmt.Fprintf(os.Stderr, "%s: %v\n", T("警告: 更新定时器失败"), err)
 			}
-			trows = append(trows, []string{t.key, fmt.Sprintf("%v", t.want), fmt.Sprintf("%v", got), mark})
+			if sysd.IsActive() {
+				if err := sysd.Service("restart"); err != nil {
+					return err
+				}
+				fmt.Println(T("已重启服务使配置生效"))
+			} else {
+				fmt.Println(T("服务未运行, 已写入配置文件 (mihomo-cli start)"))
+			}
+		} else if sysd.IsActive() {
+			if err := api.New(s).Reload(app.RuntimeConfig); err != nil {
+				fmt.Fprintf(os.Stderr, "%s: %v %s\n", T("警告: 热重载失败"), err, T("(可执行 mihomo-cli restart)"))
+			} else {
+				fmt.Println(T("已热重载配置"))
+			}
+		} else {
+			fmt.Println(T("服务未运行, 已写入配置文件 (mihomo-cli start)"))
 		}
-		ui.Table(os.Stdout, trows, 2)
-		if diff > 0 {
-			fmt.Println(T("提示: config sync update-service 以文件覆盖服务; config sync update-file 以运行状态覆盖文件"))
-		}
-		_ = same
 		return nil
 	},
 }
 
-// liveCoreConfig 读取内核运行配置关键字段
-func liveCoreConfig(s *app.Settings) map[string]string {
-	var live struct {
-		Mode          string `json:"mode"`
-		MixedPort     int    `json:"mixed-port"`
-		SocksPort     int    `json:"socks-port"`
-		HTTPPort      int    `json:"port"`
-		AllowLan      bool   `json:"allow-lan"`
-		IPV6          bool   `json:"ipv6"`
-		LogLevel      string `json:"log-level"`
-		TCPConcurrent bool   `json:"tcp-concurrent"`
-		UnifiedDelay  bool   `json:"unified-delay"`
-		KeepAlive     int    `json:"keep-alive-interval"`
+// resolveKeys 全部键或指定键 (未指定 = 除只读状态外的全部)
+func resolveKeys(args []string) ([]cfg.Key, error) {
+	if len(args) == 0 {
+		var out []cfg.Key
+		for _, k := range cfg.Keys {
+			if k.Kind == cfg.KindState {
+				continue
+			}
+			out = append(out, k)
+		}
+		return out, nil
 	}
-	m := map[string]string{}
-	if err := api.New(s).GetJSONStruct("/configs", &live); err != nil {
-		return m
+	var out []cfg.Key
+	for _, a := range args {
+		k := cfg.Lookup(a)
+		if k == nil {
+			return nil, fmt.Errorf("%s %q", T("未知配置项"), a)
+		}
+		out = append(out, *k)
 	}
-	m["proxy-mode"] = live.Mode
-	m["mixed-port"] = strconv.Itoa(live.MixedPort)
-	m["socks-port"] = strconv.Itoa(live.SocksPort)
-	m["http-port"] = strconv.Itoa(live.HTTPPort)
-	m["allow-lan"] = fmt.Sprintf("%v", live.AllowLan)
-	m["ipv6-enabled"] = fmt.Sprintf("%v", live.IPV6)
-	m["log-level"] = live.LogLevel
-	m["tcp-concurrent"] = fmt.Sprintf("%v", live.TCPConcurrent)
-	m["unified-delay"] = fmt.Sprintf("%v", live.UnifiedDelay)
-	m["keep-alive-interval"] = strconv.Itoa(live.KeepAlive)
-	return m
+	return out, nil
 }
 
-// syncFileValues 计算配置文件侧的关键字段期望值
-func syncFileValues(s *app.Settings) map[string]string {
-	mode := s.ProxyMode
-	if mode == "" {
-		mode = runtimeYAMLKey("mode")
+func orDash(s string) string {
+	if s == "" {
+		return "-"
 	}
-	if mode == "" {
-		mode = "rule"
-	}
-	level := s.LogLevel
-	if level == "" {
-		level = "info"
-	}
-	tri := func(p *bool) string {
-		if p == nil {
-			return ""
-		}
-		return fmt.Sprintf("%v", *p)
-	}
-	kai := ""
-	if s.KeepAliveInterval != nil {
-		kai = strconv.Itoa(*s.KeepAliveInterval)
-	}
-	port := func(n int) string {
-		if n == 0 {
-			return "0"
-		}
-		return strconv.Itoa(n)
-	}
-	return map[string]string{
-		"proxy-mode":         mode,
-		"mixed-port":         strconv.Itoa(s.MixedPort),
-		"socks-port":         port(s.SocksPort),
-		"http-port":          port(s.HTTPPort),
-		"allow-lan":          fmt.Sprintf("%v", s.AllowLan),
-		"ipv6-enabled":       fmt.Sprintf("%v", s.IPV6Enabled),
-		"log-level":          level,
-		"tcp-concurrent":     tri(s.TCPConcurrent),
-		"unified-delay":      tri(s.UnifiedDelay),
-		"keep-alive-interval": kai,
-	}
+	return s
 }
 
-// subYAMLKey 读当前订阅原文 yaml 顶层键
-func subYAMLKey(key string) string {
+// ---- 单键详情 (config set <key> -h) ----
+
+func configKeyHelp(name string) error {
+	k := cfg.Lookup(name)
+	if k == nil {
+		if v, ok := cfg.GetGeneric(mustSettings(), name); ok {
+			fmt.Printf("[extra] %s\n  %s: %s\n  %s: %s\n", name,
+				T("当前值"), v,
+				T("用法"), "mihomo-cli config set "+name+" <value>")
+			return nil
+		}
+		return fmt.Errorf("%s %q (%s)", T("未知配置项"), name, T("mihomo-cli config get 查看全部"))
+	}
 	s := mustSettings()
-	p := s.Current()
-	if p == nil {
-		return ""
+	cur := k.Get(s)
+	if cur == "" {
+		cur = k.Def
 	}
-	data, err := os.ReadFile(subs.Path(p.Name))
-	if err != nil {
-		return ""
+	fmt.Printf("[%s] %s\n", cfg.SectionTitles(k.Section), k.Name)
+	fmt.Printf("  %s: %s\n", T("说明"), k.Desc())
+	fmt.Printf("  %s: %s\n", T("当前值"), cur)
+	fmt.Printf("  %s: %s\n", T("默认值"), orDash(k.Def))
+	if len(k.Enum) > 0 {
+		fmt.Printf("  %s: %s\n", T("可选值"), strings.Join(k.Enum, " | "))
+	} else {
+		fmt.Printf("  %s: %s\n", T("期望"), k.Expected())
 	}
-	var m map[string]any
-	_ = yaml.Unmarshal(data, &m)
-	v, _ := m[key].(string)
-	return v
+	if k.Restart {
+		fmt.Printf("  %s: %s\n", T("生效方式"), T("优先热重载, 失败才重启服务"))
+	} else if cfg.HotPatchable(*k) {
+		fmt.Printf("  %s: %s\n", T("生效方式"), T("热切换"))
+	} else {
+		fmt.Printf("  %s: %s\n", T("生效方式"), T("热重载配置"))
+	}
+	fmt.Printf("  %s: mihomo-cli config set %s <value>\n", T("用法"), k.Name)
+	fmt.Printf("  %s: mihomo-cli config reset-default %s\n", T("恢复默认"), k.Name)
+	return nil
 }
 
-// runtimeYAMLKey 读 runtime/config.yaml 顶层键
-func runtimeYAMLKey(key string) string {
-	data, err := os.ReadFile(app.RuntimeConfig)
-	if err != nil {
-		return ""
-	}
-	var m map[string]any
-	_ = yaml.Unmarshal(data, &m)
-	v, _ := m[key].(string)
-	return v
-}
-
-var _ = http.StatusOK
+// ---- 补全 ----
 
 func configKeyComp(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-	if len(args) == 0 {
-		var out []string
-		for _, e := range configKeys {
-			if strings.HasPrefix(e.key, toComplete) {
-				out = append(out, e.key)
-			}
-		}
-		return out, cobra.ShellCompDirectiveNoFileComp
-	}
-	return nil, cobra.ShellCompDirectiveNoFileComp
+	return cfg.CompleteKeys(toComplete), noFileComp()
 }
 
+// noFileComp 统一 directive: 全命令树禁止文件补全 (mihomo-cli 不与文件打交道)
+func noFileComp() cobra.ShellCompDirective { return cobra.ShellCompDirectiveNoFileComp }
+
 func configValueComp(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-	if len(args) == 1 {
-		switch args[0] {
-		case "cli-language":
-			return []string{"auto", "zh", "en"}, cobra.ShellCompDirectiveNoFileComp
-		case "allow-lan", "ipv6-enabled", "sub-auto-update-enabled", "node-auto-select-enabled":
-			return []string{"true", "false"}, cobra.ShellCompDirectiveNoFileComp
-		case "proxy-mode":
-			return []string{"rule", "global", "direct"}, cobra.ShellCompDirectiveNoFileComp
-		case "log-level":
-			return []string{"debug", "info", "warning", "error", "silent"}, cobra.ShellCompDirectiveNoFileComp
+	if len(args) != 1 {
+		return nil, noFileComp()
+	}
+	k := cfg.Lookup(args[0])
+	if k == nil {
+		return nil, noFileComp()
+	}
+	return prefixFilter(k.CompleteValues(), toComplete), noFileComp()
+}
+
+func prefixFilter(list []string, prefix string) []string {
+	var out []string
+	for _, v := range list {
+		if strings.HasPrefix(v, prefix) {
+			out = append(out, v)
 		}
 	}
-	return nil, cobra.ShellCompDirectiveNoFileComp
+	return out
+}
+
+// okWord 勾/叉的文字 (颜色由调用方加)
+func okWord(ok bool) string {
+	if ok {
+		return "✔"
+	}
+	return "✘"
+}
+
+// sortedKeys 键名排序 (补全/文档用)
+func sortedKeys() []string {
+	out := cfg.Names()
+	sort.Strings(out)
+	return out
 }
 
 func init() {
 	configSetCmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {
-		// config set <key> -h 只显示该键详情; 无 key 显示分组帮助
 		if pos := cmd.Flags().Args(); len(pos) > 0 {
 			_ = configKeyHelp(pos[0])
 			return
 		}
-		fmt.Println(cmd.Long)
+		fmt.Println(configSetCmd.Long)
 	})
 	configGetCmd.ValidArgsFunction = configKeyComp
+	configResetCmd.ValidArgsFunction = configKeyComp
 	configSetCmd.ValidArgsFunction = func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-		if out, d := configKeyComp(cmd, args, toComplete); len(args) == 0 {
-			return out, d
+		if len(args) == 0 {
+			return configKeyComp(cmd, args, toComplete)
 		}
 		return configValueComp(cmd, args, toComplete)
 	}
-	configSyncCmd.ValidArgsFunction = func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-		if len(args) == 0 {
-			var out []string
-			for _, m := range []string{"update-file", "update-service"} {
-				if strings.HasPrefix(m, toComplete) {
-					out = append(out, m)
-				}
-			}
-			return out, cobra.ShellCompDirectiveNoFileComp
-		}
-		return nil, cobra.ShellCompDirectiveNoFileComp
+	configUnsetCmd.ValidArgsFunction = configKeyComp
+	for _, c := range []*cobra.Command{configUpdateFileCmd, configUpdateServiceCmd} {
+		c.ValidArgsFunction = configKeyComp
 	}
-	configCmd.AddCommand(configGetCmd, configSetCmd, configResetCmd, configSyncCmd)
+	// set 的长帮助由注册表生成: 新增键只需改表格, 帮助/补全/校验自动跟着变
+	configSetCmd.Long = buildSetHelp()
+	for _, c := range []*cobra.Command{configSetCmd, configResetCmd, configUpdateFileCmd, configUpdateServiceCmd} {
+		markMutating(c)
+	}
+	configCmd.AddCommand(configGetCmd, configSetCmd, configResetCmd, configUnsetCmd, configUpdateFileCmd, configUpdateServiceCmd)
 	rootCmd.AddCommand(configCmd)
+}
+
+// buildSetHelp 从注册表生成 config set 的分组帮助 (单一事实来源)
+func buildSetHelp() string {
+	var b strings.Builder
+	b.WriteString(T("修改配置并立即生效; 非法值拒绝写入。裸命令执行显示本帮助, <key> -h 显示单键详情。") + "\n")
+	for _, sec := range []string{"core", "cli", "timer", "dns", "tun"} {
+		keys := cfg.KeysOf(sec)
+		if len(keys) == 0 {
+			continue
+		}
+		fmt.Fprintf(&b, "\n-- %s --\n", cfg.SectionTitles(sec))
+		for _, k := range keys {
+			vals := legalValues(&k)
+			if k.Kind == cfg.KindEnum {
+				vals = strings.Join(k.Enum, "|")
+			}
+			fmt.Fprintf(&b, "%-32s %s%s\n", k.Name+" <"+vals+">", k.Desc(), defSuffix(k))
+		}
+	}
+	b.WriteString("\n" + T("未注册的内核配置项(任意 yaml 路径)也可写, 值按字面推断类型:") + "\n")
+	b.WriteString("  mihomo-cli config set sniffer.enable true\n")
+	b.WriteString("  mihomo-cli config set geodata-mode false\n")
+	b.WriteString("  mihomo-cli config set hosts 'a.com = 1.2.3.4'\n")
+	return b.String()
+}
+
+func defSuffix(k cfg.Key) string {
+	if k.Def == "" {
+		return ""
+	}
+	return " [" + T("默认") + " " + k.Def + "]"
 }

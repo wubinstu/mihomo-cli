@@ -179,11 +179,11 @@ func applyRules(s *app.Settings) error {
 // ---- list ----
 
 var (
-	ruleWithSub   bool
-	filterType    string
-	filterCond    string
-	filterStrat   string
-	filterNoRes   bool
+	ruleWithSub bool
+	filterType  string
+	filterCond  string
+	filterStrat string
+	filterNoRes bool
 )
 
 func filterMatch(typ, cond, strat string, noRes bool) bool {
@@ -370,7 +370,7 @@ func addHelp(cmd *cobra.Command, args []string) {
 			fmt.Printf("  %-12s %s\n", p.Name, p.Desc)
 		}
 		fmt.Printf("  %-12s %s\n", "PROXY", T("当前 group use 的分组"))
-		fmt.Printf("  %-12s %s\n", "<"+T("分组名")+">", T("模糊匹配代理分组, 如")+" '节点选择')")
+		fmt.Printf("  %-12s %s\n", "<"+T("分组名")+">", T("模糊匹配代理分组, 如")+" '<group-name>')")
 	case ruleTypeDoc(typ) == nil:
 		fmt.Printf("%s %q\n", T("未知规则类型"), typ)
 	case cond == "":
@@ -417,14 +417,14 @@ var ruleEnableCmd = &cobra.Command{
 	Use:   "enable <#id>",
 	Short: T("启用用户规则"),
 	Args:  cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error { return ruleToggle(args[0], true) },
+	RunE:  func(cmd *cobra.Command, args []string) error { return ruleToggle(args[0], true) },
 }
 
 var ruleDisableCmd = &cobra.Command{
 	Use:   "disable <#id>",
 	Short: T("禁用用户规则"),
 	Args:  cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error { return ruleToggle(args[0], false) },
+	RunE:  func(cmd *cobra.Command, args []string) error { return ruleToggle(args[0], false) },
 }
 
 var ruleRmCmd = &cobra.Command{
@@ -517,6 +517,12 @@ func init() {
 		c.RegisterFlagCompletionFunc("strategy", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 			return []string{"DIRECT", "REJECT", "REJECT-DROP", "PASS"}, cobra.ShellCompDirectiveNoFileComp
 		})
+	}
+	for _, c := range []*cobra.Command{ruleAddCmd, ruleRmCmd, ruleEnableCmd, ruleDisableCmd} {
+		markMutating(c)
+	}
+	for _, c := range []*cobra.Command{ruleEnableCmd, ruleDisableCmd, ruleRmCmd} {
+		c.ValidArgsFunction = ruleIDComp
 	}
 	ruleCmd.AddCommand(ruleListCmd, ruleAddCmd, ruleRmCmd, ruleEnableCmd, ruleDisableCmd)
 	rootCmd.AddCommand(ruleCmd)

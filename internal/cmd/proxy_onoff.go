@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"net"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -30,9 +29,9 @@ var proxyOnCmd = &cobra.Command{
 			}
 			fmt.Fprintln(os.Stderr, T("服务未运行, 已自动启动"))
 		}
-		addr := fmt.Sprintf("127.0.0.1:%d", s.MixedPort)
+		addr := fmt.Sprintf("127.0.0.1:%d", s.ProxyPort())
 		if s.AllowLan {
-			addr = fmt.Sprintf("%s:%d", lanIP(), s.MixedPort)
+			addr = fmt.Sprintf("%s:%d", lanIP(), s.ProxyPort())
 		}
 		fmt.Printf(`export http_proxy=http://%s
 export https_proxy=http://%s
@@ -56,15 +55,6 @@ var proxyOffCmd = &cobra.Command{
 		fmt.Println(`unset http_proxy https_proxy all_proxy HTTP_PROXY HTTPS_PROXY ALL_PROXY no_proxy NO_PROXY`)
 		return nil
 	},
-}
-
-func lanIP() string {
-	conn, err := net.Dial("udp", "8.8.8.8:53")
-	if err != nil {
-		return "0.0.0.0"
-	}
-	defer conn.Close()
-	return conn.LocalAddr().(*net.UDPAddr).IP.String()
 }
 
 func init() {

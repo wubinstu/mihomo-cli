@@ -269,6 +269,10 @@ var groupUnuseCmd = &cobra.Command{
 }
 
 func init() {
+	for _, c := range []*cobra.Command{groupUseCmd, groupUnuseCmd} {
+		markMutating(c)
+	}
+	groupUseCmd.ValidArgsFunction = groupArgComp
 	groupCmd.AddCommand(groupListCmd, groupUseCmd, groupUnuseCmd)
 	rootCmd.AddCommand(groupCmd)
 }

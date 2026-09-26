@@ -106,8 +106,8 @@ func printTop(c *api.Client) error {
 			connAge(cn.Start),
 			strings.Join(cn.Chains, "/"),
 			humanBytes(cn.Upload), humanBytes(cn.Download),
-			humanBytes((cn.Upload-upPrev)/int64(dt)),
-			humanBytes((cn.Download-downPrev)/int64(dt)),
+			humanBytes((cn.Upload - upPrev) / int64(dt)),
+			humanBytes((cn.Download - downPrev) / int64(dt)),
 		})
 	}
 	ui.Table(os.Stdout, rows, 1)
@@ -223,6 +223,7 @@ var topKillCmd = &cobra.Command{
 }
 
 func init() {
+	topKillCmd.ValidArgsFunction = connIDComp
 	topCmd.AddCommand(topKillCmd)
 	rootCmd.AddCommand(topCmd)
 }

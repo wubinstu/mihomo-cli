@@ -6,10 +6,12 @@ import (
 	"os"
 	"strings"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/wubinstu/mihomo-cli/internal/app"
+	"github.com/wubinstu/mihomo-cli/internal/cfg"
 	"github.com/wubinstu/mihomo-cli/internal/i18n"
 	"github.com/wubinstu/mihomo-cli/internal/subs"
-	"gopkg.in/yaml.v3"
 )
 
 // DeepMerge 将 src 合并覆盖到 dst (src 优先, 递归合并 map, 其余类型直接覆盖)
@@ -25,58 +27,79 @@ func DeepMerge(dst, src map[string]any) {
 	}
 }
 
-// Generate 将「当前订阅 + overrides.yaml + 运行时注入项」合成为 runtime/config.yaml
+// minimalConfig 无生效订阅时的最小配置: mode direct, 全部流量直连, 服务保持运行
+func minimalConfig(s *app.Settings) map[string]any {
+	m := map[string]any{
+		"allow-lan":           s.AllowLan,
+		"mode":                "direct",
+		"log-level":           "info",
+		"external-controller": "127.0.0.1:9090",
+		"secret":              s.APISecret,
+	}
+	injectPorts(m, s)
+	if s.AllowLan {
+		m["bind-address"] = "*"
+	}
+	return m
+}
+
+// injectPorts 写入三个代理端口; off/sub 一律不写 (交由订阅或内核默认)
+func injectPorts(cfgMap map[string]any, s *app.Settings) {
+	if n, ok := app.PortNum(s.MixedPort); ok {
+		cfgMap["mixed-port"] = n
+	} else {
+		delete(cfgMap, "mixed-port")
+	}
+	if n, ok := app.PortNum(s.SocksPort); ok {
+		cfgMap["socks-port"] = n
+	} else {
+		delete(cfgMap, "socks-port")
+	}
+	if n, ok := app.PortNum(s.HTTPPort); ok {
+		cfgMap["port"] = n
+	} else {
+		delete(cfgMap, "port")
+	}
+	delete(cfgMap, "redir-port")
+}
+
+// Generate 将「当前订阅 + [overrides] + 运行时注入项」合成为 runtime/config.yaml
 // 无生效订阅时生成空配置(mode: direct): 服务保持运行, 全部流量直连
 func Generate(s *app.Settings) error {
 	if err := app.EnsureDirs(); err != nil {
 		return err
 	}
+	cfgMap := map[string]any{}
 	if s.Current() == nil {
-		minimal := map[string]any{
-			"mixed-port":           s.MixedPort,
-			"allow-lan":            s.AllowLan,
-			"mode":                 "direct",
-			"log-level":            "info",
-			"external-controller":  "127.0.0.1:9090",
-			"secret":               s.APISecret,
-		}
-		if s.AllowLan {
-			minimal["bind-address"] = "*"
-		}
-		out, err := yaml.Marshal(minimal)
+		out, err := yaml.Marshal(minimalConfig(s))
 		if err != nil {
 			return err
 		}
-		return os.WriteFile(app.RuntimeConfig, out, 0o644)
+		return os.WriteFile(app.RuntimeConfig, out, 0o640)
 	}
 	p := s.Current()
-	if p == nil {
-		return fmt.Errorf("%s", i18n.T("没有可用订阅, 请先执行 mihomo-cli init 或 mihomo-cli sub add"))
-	}
 	data, err := os.ReadFile(subs.Path(p.Name))
 	if err != nil {
 		return fmt.Errorf("%s: %w", i18n.T("读取订阅文件失败"), err)
 	}
-	var cfg map[string]any
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
+	if err := yaml.Unmarshal(data, &cfgMap); err != nil {
 		return fmt.Errorf("%s: %w", i18n.T("订阅配置解析失败"), err)
 	}
-	if cfg == nil {
-		cfg = map[string]any{}
+	if cfgMap == nil {
+		cfgMap = map[string]any{}
 	}
 
-	// 用户覆盖层
-	if ov, err := os.ReadFile(app.OverridesFile); err == nil {
-		var m map[string]any
-		if yaml.Unmarshal(ov, &m) == nil && m != nil {
-			DeepMerge(cfg, m)
+	// 点号路径写入的配置段: 深合并进订阅 (只用过的段才出现, 未用过的完全不碰订阅)
+	for _, sec := range []string{"dns", "tun"} {
+		if m := cfg.OverrideSection(s, sec); m != nil {
+			DeepMerge(cfgMap, map[string]any{sec: m})
 		}
 	}
 
 	// geo 数据镜像 (内核更新 geodata 时不再直连 GitHub; 用户 overrides 可覆盖)
-	if _, ok := cfg["geox-url"]; !ok {
-		if _, need := cfg["rules"]; need {
-			cfg["geox-url"] = map[string]any{
+	if _, ok := cfgMap["geox-url"]; !ok {
+		if _, need := cfgMap["rules"]; need {
+			cfgMap["geox-url"] = map[string]any{
 				"geoip":   "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geoip.metadb",
 				"geosite": "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geosite.dat",
 				"mmdb":    "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/country.mmdb",
@@ -86,47 +109,37 @@ func Generate(s *app.Settings) error {
 	}
 
 	// cli 运行时注入层(强制)
-	cfg["external-controller"] = "127.0.0.1:9090"
-	cfg["secret"] = s.APISecret
-	cfg["log-level"] = "info"
-	cfg["mixed-port"] = s.MixedPort
-	if s.SocksPort > 0 {
-		cfg["socks-port"] = s.SocksPort
-	} else {
-		delete(cfg, "socks-port")
-	}
-	if s.HTTPPort > 0 {
-		cfg["port"] = s.HTTPPort
-	} else {
-		delete(cfg, "port")
-	}
-	delete(cfg, "redir-port")
-	cfg["allow-lan"] = s.AllowLan
+	cfgMap["external-controller"] = "127.0.0.1:9090"
+	cfgMap["secret"] = s.APISecret
+	injectPorts(cfgMap, s)
+	cfgMap["allow-lan"] = s.AllowLan
 	if s.AllowLan {
-		cfg["bind-address"] = "*"
+		cfgMap["bind-address"] = "*"
+	} else {
+		delete(cfgMap, "bind-address")
 	}
-	if s.ProxyMode != "" {
-		cfg["mode"] = s.ProxyMode
-	}
-	if s.IPV6Enabled {
-		cfg["ipv6"] = true
-	}
-	if s.LogLevel != "" {
-		cfg["log-level"] = s.LogLevel
-	}
-	if s.TCPConcurrent != nil {
-		cfg["tcp-concurrent"] = *s.TCPConcurrent
-	}
-	if s.UnifiedDelay != nil {
-		cfg["unified-delay"] = *s.UnifiedDelay
-	}
-	if s.KeepAliveInterval != nil {
-		cfg["keep-alive-interval"] = *s.KeepAliveInterval
+	// 三态键: "sub" = 不注入(跟随订阅); 空值 = 默认值 (CLI 权威, 照样注入)
+	for _, name := range []string{"proxy-mode", "log-level", "tcp-concurrent", "unified-delay", "keep-alive-interval"} {
+		k := cfg.Lookup(name)
+		if k == nil {
+			continue
+		}
+		v := k.Effective(s)
+		if v == "" || v == "sub" {
+			continue
+		}
+		if k.Kind == cfg.KindInt {
+			if n, ok := app.PortNum(v); ok && n > 0 {
+				cfgMap[cfg.YAMLPath(name)] = n
+			}
+			continue
+		}
+		cfgMap[cfg.YAMLPath(name)] = triValue(k, v)
 	}
 	// 用户规则优先: 置于订阅规则之前 (mihomo 首条匹配即生效)
 	if enabled := s.EnabledRules(); len(enabled) > 0 {
 		subRules := []string{}
-		if raw, ok := cfg["rules"].([]any); ok {
+		if raw, ok := cfgMap["rules"].([]any); ok {
 			for _, r := range raw {
 				if rs, ok := r.(string); ok {
 					subRules = append(subRules, rs)
@@ -134,34 +147,71 @@ func Generate(s *app.Settings) error {
 			}
 		}
 		merged := append(append([]string{}, enabled...), subRules...)
-		cfg["rules"] = merged
+		cfgMap["rules"] = merged
 	}
 	// 自定义 DNS: 覆盖 nameserver; default-nameserver 必须为纯 IP (内核要求), DoH 时用内置 IP
+	if len(s.DNSServers) > 0 || dnsSectionActive(s) {
+		injectDNS(cfgMap, s)
+	}
+
+	out, err := yaml.Marshal(cfgMap)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(app.RuntimeConfig, out, 0o640)
+}
+
+// dnsSectionActive dns 段是否被显式开启 (config set dns.enable true)
+func dnsSectionActive(s *app.Settings) bool {
+	m := cfg.OverrideSection(s, "dns")
+	if m == nil {
+		return false
+	}
+	on, _ := m["enable"].(bool)
+	return on
+}
+
+// injectDNS 组装 dns 段: 顶层键由注册表提供, cli 侧的 nameserver 优先
+func injectDNS(cfgMap map[string]any, s *app.Settings) {
+	dns, _ := cfgMap["dns"].(map[string]any)
+	if dns == nil {
+		dns = map[string]any{}
+	}
+	dns["enable"] = true
 	if len(s.DNSServers) > 0 {
-		dns, _ := cfg["dns"].(map[string]any)
-		if dns == nil {
-			dns = map[string]any{}
-		}
-		dns["enable"] = true
-		dns["nameserver"] = s.DNSServers
-		defaultNS := []string{"223.5.5.5", "119.29.29.29"}
+		dns["nameserver"] = toAnyList(s.DNSServers)
+	}
+	// default-nameserver 必须纯 IP: 自定义 nameserver 全是 DoH/DoT 时用内置 IP
+	if _, ok := dns["default-nameserver"]; !ok {
+		ns := s.DNSServers
 		hasIP := false
-		for _, ns := range s.DNSServers {
-			if net.ParseIP(strings.Split(strings.Split(ns, "//")[len(strings.Split(ns, "//"))-1], ":")[0]) != nil && !strings.Contains(ns, "://") {
+		for _, n := range ns {
+			if net.ParseIP(strings.Split(strings.Split(n, "//")[len(strings.Split(n, "//"))-1], ":")[0]) != nil && !strings.Contains(n, "://") {
 				hasIP = true
 				break
 			}
 		}
-		if hasIP {
-			defaultNS = s.DNSServers
+		if hasIP && len(ns) > 0 {
+			dns["default-nameserver"] = toAnyList(ns)
+		} else {
+			dns["default-nameserver"] = toAnyList([]string{"223.5.5.5", "119.29.29.29"})
 		}
-		dns["default-nameserver"] = defaultNS
-		cfg["dns"] = dns
 	}
+	cfgMap["dns"] = dns
+}
 
-	out, err := yaml.Marshal(cfg)
-	if err != nil {
-		return err
+func toAnyList(items []string) []any {
+	out := make([]any, 0, len(items))
+	for _, it := range items {
+		out = append(out, it)
 	}
-	return os.WriteFile(app.RuntimeConfig, out, 0o644)
+	return out
+}
+
+// triValue 布尔三态键的类型转换
+func triValue(k *cfg.Key, v string) any {
+	if k.Kind == cfg.KindBool || k.Kind == cfg.KindTri {
+		return v == "true"
+	}
+	return v
 }

@@ -322,10 +322,18 @@ func nil2map(c *api.Client) map[string]api.Proxy {
 	return map[string]api.Proxy{}
 }
 
-
 func init() {
 	for _, sub := range []*cobra.Command{nodeCmd, nodeUseCmd, nodeUnuseCmd, nodeTestCmd, nodeAutoCmd} {
 		sub.Flags().StringVarP(&nodeGroupFlag, "group", "g", "", T("分组")+" (id|name)")
+	}
+	for _, c := range []*cobra.Command{nodeUseCmd, nodeUnuseCmd, nodeAutoCmd} {
+		markMutating(c)
+	}
+	for _, c := range []*cobra.Command{nodeUseCmd, nodeUnuseCmd} {
+		c.ValidArgsFunction = nodeArgComp
+	}
+	for _, c := range []*cobra.Command{nodeCmd, nodeUseCmd, nodeUnuseCmd, nodeTestCmd, nodeAutoCmd} {
+		c.RegisterFlagCompletionFunc("group", groupFlagComp)
 	}
 	nodeCmd.AddCommand(nodeListCmd, nodeUseCmd, nodeUnuseCmd, nodeTestCmd, nodeAutoCmd)
 	rootCmd.AddCommand(nodeCmd)

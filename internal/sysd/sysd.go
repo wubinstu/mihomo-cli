@@ -14,9 +14,16 @@ import (
 	"github.com/wubinstu/mihomo-cli/internal/i18n"
 )
 
-const unitDir = "/etc/systemd/system"
-
 const serviceName = "mihomo-cli.service"
+
+// unitDir systemd 单元目录。生产环境固定 /etc/systemd/system;
+// 测试环境 (MIHOMO_CLI_HOME 指向别处) 放沙箱目录, 避免污染真实 systemd 配置。
+var unitDir = func() string {
+	if app.BaseDir != "/etc/mihomo-cli" {
+		return filepath.Join(app.BaseDir, "systemd")
+	}
+	return "/etc/systemd/system"
+}()
 
 // runRoot 以 root 权限执行命令(需要时自动加 sudo)
 func runRoot(name string, args ...string) (string, error) {
@@ -52,8 +59,12 @@ func daemonReload() error {
 	return err
 }
 
-// ServiceUnit 生成主服务单元
-func ServiceUnit() string {
+// ServiceUnit 生成主服务单元; caps=true 时给内核申请 CAP_NET_ADMIN/CAP_NET_RAW (TUN 需要)
+func ServiceUnit(caps bool) string {
+	ambi := ""
+	if caps {
+		ambi = "AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW\nCapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW\n"
+	}
 	return fmt.Sprintf(`[Unit]
 Description=mihomo proxy core (managed by mihomo-cli)
 After=network-online.target
@@ -67,15 +78,15 @@ RestartSec=3
 LimitNOFILE=1048576
 StandardOutput=journal
 StandardError=journal
-
+%s
 [Install]
 WantedBy=multi-user.target
-`, app.CoreBin, app.RuntimeDir)
+`, app.CoreBin, app.RuntimeDir, ambi)
 }
 
-// InstallService 安装并 enable 主服务
-func InstallService() error {
-	if err := writeUnit(serviceName, ServiceUnit()); err != nil {
+// InstallService 安装并 enable 主服务; caps=true 时给内核申请 CAP_NET_ADMIN (TUN 需要)
+func InstallService(caps bool) error {
+	if err := writeUnit(serviceName, ServiceUnit(caps)); err != nil {
 		return fmt.Errorf("%s: %w", i18n.T("写入 systemd 单元失败(需要 root)"), err)
 	}
 	if err := daemonReload(); err != nil {
@@ -83,6 +94,15 @@ func InstallService() error {
 	}
 	_, err := runRoot("systemctl", "enable", serviceName)
 	return err
+}
+
+// EnsureCapabilities 按 config.toml 的 tun.enable 重写主服务单元 (TUN 需要 CAP_NET_ADMIN);
+// 未安装服务单元时跳过。调用方负责随后的重启。
+func EnsureCapabilities(caps bool) error {
+	if _, err := os.Stat(filepath.Join(unitDir, serviceName)); err != nil {
+		return nil
+	}
+	return InstallService(caps)
 }
 
 // InstallTimers 安装订阅自动更新与自动选节点的 systemd timer
@@ -199,6 +219,9 @@ func systemdDur(d time.Duration) string {
 	return strconv.FormatInt(int64(d.Seconds()), 10) + "s"
 }
 
+// InstallTimersQuiet 同 InstallTimers, 失败仅返回错误 (不打印)
+func InstallTimersQuiet(s *app.Settings) error { return InstallTimers(s) }
+
 // RemoveAll 卸载全部单元文件
 func RemoveAll() {
 	_, _ = runRoot("systemctl", "disable", "--now", serviceName, "mihomo-cli-sub.timer", "mihomo-cli-auto.timer", "mihomo-cli-resource.timer")
@@ -231,4 +254,33 @@ func TimerEnabled(name string) bool {
 	}
 	out, err := cmd.Output()
 	return err == nil && strings.TrimSpace(string(out)) == "enabled"
+}
+
+// TimerInterval 读取 timer 的实际执行周期 (OnUnitActiveSec), 读不到返回 "-"
+func TimerInterval(name string) string {
+	p := filepath.Join(unitDir, name)
+	data, err := os.ReadFile(p)
+	if err != nil {
+		return "-"
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "OnUnitActiveSec=") {
+			v := strings.TrimPrefix(line, "OnUnitActiveSec=")
+			if sec, err := strconv.Atoi(strings.TrimSuffix(v, "s")); err == nil && sec > 0 {
+				d := time.Duration(sec) * time.Second
+				if int(d.Hours())%24 == 0 && d >= 24*time.Hour {
+					return fmt.Sprintf("%dh", int(d.Hours()))
+				}
+				if int(d.Minutes())%60 == 0 && d >= time.Hour {
+					return fmt.Sprintf("%dh", int(d.Hours()))
+				}
+				if int(d.Seconds())%60 == 0 && d >= time.Minute {
+					return fmt.Sprintf("%dm", int(d.Minutes()))
+				}
+				return d.String()
+			}
+		}
+	}
+	return "-"
 }

@@ -15,7 +15,6 @@ import (
 	"github.com/wubinstu/mihomo-cli/internal/ui"
 )
 
-
 var subCmd = &cobra.Command{
 	Use:   "sub",
 	Short: T("订阅管理: add/rm/list/update/use/unuse"),
@@ -246,6 +245,13 @@ func humanTime(t time.Time) string {
 }
 
 func init() {
+	for _, c := range []*cobra.Command{subAddCmd, subRmCmd, subRenameCmd, subUpdateCmd, subUseCmd, subUnuseCmd} {
+		markMutating(c)
+	}
+	subRmCmd.ValidArgsFunction = subArgComp
+	subUpdateCmd.ValidArgsFunction = subArgComp
+	subUseCmd.ValidArgsFunction = subArgComp
+	subRenameCmd.ValidArgsFunction = subArgComp
 	subCmd.AddCommand(subAddCmd, subRmCmd, subListCmd, subUpdateCmd, subUseCmd, subUnuseCmd, subRenameCmd)
 	rootCmd.AddCommand(subCmd)
 }
