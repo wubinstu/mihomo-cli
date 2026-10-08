@@ -3,16 +3,15 @@ package cmd
 import (
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/wubinstu/mihomo-cli/internal/api"
 	"github.com/wubinstu/mihomo-cli/internal/app"
-	"github.com/wubinstu/mihomo-cli/internal/cfg"
 	"github.com/wubinstu/mihomo-cli/internal/render"
 	"github.com/wubinstu/mihomo-cli/internal/sysd"
 	"github.com/wubinstu/mihomo-cli/internal/ui"
+	"time"
 )
 
 func mustSettings() *app.Settings {
@@ -130,9 +129,12 @@ var statusCmd = &cobra.Command{
 
 		// 顺序固定 Res → Sub → Node (与 doctor 完全一致)
 		rows = append(rows,
-			checkRow{true, T("Res auto-update"), timerText(s.ResourceAutoUpdateEnabled, s.ResourceAutoUpdateInterval)},
-			checkRow{true, T("Sub auto-update"), subTimerText(s)},
-			checkRow{true, T("Node auto-select"), nodeTimerText(s)},
+			checkRow{true, T("Res auto-update"),
+				timerText(sysd.ResourceTimerName(), s.ResourceAutoUpdateEnabled, s.ResourceAutoUpdateInterval, s.ResourceLastRun)},
+			checkRow{true, T("Sub auto-update"),
+				timerText(sysd.SubTimerName(), s.SubAutoUpdateEnabled, s.SubAutoUpdateInterval, subLast(s))},
+			checkRow{true, T("Node auto-select"),
+				timerText(sysd.NodeTimerName(), s.NodeAutoSelectEnabled, s.NodeAutoSelectInterval, s.AutoSelectLastRun)},
 		)
 
 		ui.TableSections(stdoutWriter(), []string{"", T("项目"), T("值")}, []ui.Section{{Rows: plainToRows(rows)}}, 2)
@@ -140,32 +142,15 @@ var statusCmd = &cobra.Command{
 	},
 }
 
-// subTimerText 订阅自动更新: 悬空(sub unuse)时如实说明
-func subTimerText(s *app.Settings) string {
-	if s.Current() == nil {
-		return T("悬空 (sub unuse)")
+// subLast 订阅更新的上次时间: 优先 systemd, 回退订阅自己的更新时间
+func subLast(s *app.Settings) time.Time {
+	if t := sysd.TimerLast(sysd.SubTimerName()); !t.IsZero() {
+		return t
 	}
-	last := humanTime(s.Current().UpdatedAt)
-	if s.SubAutoUpdateEnabled {
-		return fmt.Sprintf("%s | %s %s | %s %s", T("已启用"), T("上次"), last,
-			T("下次"), remaining(s.Current().UpdatedAt, s.SubAutoUpdateInterval))
+	if p := s.Current(); p != nil {
+		return p.UpdatedAt
 	}
-	return fmt.Sprintf("%s | %s %s", T("已停用"), T("上次"), last)
-}
-
-// nodeTimerText 自动择优: group 未选时显示悬空
-func nodeTimerText(s *app.Settings) string {
-	if s.Current() == nil {
-		return T("悬空 (sub unuse)")
-	}
-	if s.CurrentGroup == "" {
-		return T("悬空 (group 未选)")
-	}
-	if s.NodeAutoSelectEnabled {
-		return fmt.Sprintf("%s | %s %s | %s %s", T("已启用"), T("上次"), humanTime(s.AutoSelectLastRun),
-			T("下次"), remaining(s.AutoSelectLastRun, s.NodeAutoSelectInterval))
-	}
-	return fmt.Sprintf("%s | %s %s", T("已停用"), T("上次"), humanTime(s.AutoSelectLastRun))
+	return time.Time{}
 }
 
 func onOff2(b bool) string {
@@ -173,17 +158,6 @@ func onOff2(b bool) string {
 		return T("已启用")
 	}
 	return T("已停用")
-}
-
-func remaining(last time.Time, ivl time.Duration) string {
-	if last.IsZero() {
-		return "?"
-	}
-	left := time.Until(last.Add(ivl))
-	if left < 0 {
-		left = 0
-	}
-	return cfg.DurHuman(time.Duration(int(left.Minutes())) * time.Minute) // 剩余时间截断到分钟
 }
 
 func init() {

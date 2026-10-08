@@ -50,7 +50,6 @@ var configGetCmd = &cobra.Command{
 			// 段
 			if isSection(arg) {
 				printConfigSections(s, live, []string{arg})
-				printSectionHint(arg)
 				return nil
 			}
 			// 未注册的点号路径 (通用键)
@@ -67,7 +66,6 @@ var configGetCmd = &cobra.Command{
 			}
 		}
 		printConfigSections(s, live, sections)
-		printSectionHint("")
 		return nil
 	},
 }
@@ -93,25 +91,31 @@ func isSection(name string) bool {
 // printConfigSections 一张表打印多个配置段 (列宽跨段统一)
 func printConfigSections(s *app.Settings, live *cfg.Live, sections []string) {
 	secs := []ui.Section{}
-	diff := []string{}
+	truncated := false
 	for _, sec := range sections {
 		rows := [][]string{}
 		for _, k := range cfg.KeysOf(sec) {
 			setting := k.Effective(s)
+			if setting == "" && !k.Managed() {
+				setting = "-" // 未接管: 不写进内核 yaml, 订阅/内核原样保留
+			}
 			def := k.Def
 			if def == "" {
 				def = "/"
 			}
 			run := live.Value(k)
 			state := "-"
-			if run != "-" {
+			if run != "-" && run != "" {
 				if live.Same(k, setting) {
 					state = ui.Paint("\x1b[32m", okWord(true))
 				} else {
 					state = ui.Paint("\x1b[31m", okWord(false))
-					diff = append(diff, k.Name)
 				}
 			}
+			// 长值截断, 完整值用 config get <key> (单键输出不截断)
+			setting = ui.Truncate(setting, ui.MaxCellWidth, &truncated)
+			def = ui.Truncate(def, ui.MaxCellWidth, &truncated)
+			run = ui.Truncate(run, ui.MaxCellWidth, &truncated)
 			rows = append(rows, []string{k.Name, run, setting, def, state})
 		}
 		if len(rows) == 0 {
@@ -124,28 +128,11 @@ func printConfigSections(s *app.Settings, live *cfg.Live, sections []string) {
 		return
 	}
 	ui.TableSections(os.Stdout, []string{"KEY", T("运行值"), T("设置值"), T("默认值"), T("状态")}, secs, 2)
-	if len(diff) > 0 {
-		fmt.Printf("%s\n", T("提示: 与运行态不同的项")+": "+strings.Join(diff, ", ")+" — "+T("用 config update-service 以配置文件覆盖, config update-file 以运行值覆盖"))
+	if truncated {
+		fmt.Printf("(%s)\n", T("长值已截断, 完整值: mihomo-cli config get <key>"))
 	}
 	if !live.Running() {
 		fmt.Printf("%s\n", T("服务未运行, 运行值与状态列不可用 (mihomo-cli start)"))
-	}
-}
-
-// printSectionHint 提示还有哪些可用段 (未使用时不占用表格)
-func printSectionHint(shown string) {
-	var avail []string
-	for _, sec := range []string{"dns", "tun"} {
-		if sec == shown {
-			continue
-		}
-		avail = append(avail, "config get "+sec)
-	}
-	if shown != "" {
-		return
-	}
-	if len(avail) > 0 {
-		fmt.Printf("%s: %s\n", T("其他配置段(未使用时隐藏)"), strings.Join(avail, " | "))
 	}
 }
 
@@ -192,10 +179,10 @@ func configSet(s *app.Settings, key, value string) error {
 		return err
 	}
 	fmt.Printf("%s = %s %s\n", key, canon, T("已保存"))
-	if k.Name == "cli-language" && canon != "auto" {
+	if k.Name == "cli.language" && canon != "auto" {
 		i18n.Set(canon)
 	}
-	if k.Name == "github-mirror" {
+	if k.Name == "cli.github-mirror" {
 		_ = render.Generate(s)
 	}
 	return applyConfig(s, k)
@@ -603,7 +590,7 @@ func configKeyHelp(name string) error {
 // ---- 补全 ----
 
 func configKeyComp(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-	return cfg.CompleteKeys(toComplete), noFileComp()
+	return keyCompletion(args, toComplete)
 }
 
 // noFileComp 统一 directive: 全命令树禁止文件补全 (mihomo-cli 不与文件打交道)
@@ -656,7 +643,8 @@ func init() {
 	configGetCmd.ValidArgsFunction = configKeyComp
 	configResetCmd.ValidArgsFunction = configKeyComp
 	configSetCmd.ValidArgsFunction = func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-		if len(args) == 0 {
+		// 上一个参数以 "." 结尾说明还在敲键名(半截点号路径), 不能走补值分支
+		if len(args) == 0 || strings.HasSuffix(args[len(args)-1], ".") {
 			return configKeyComp(cmd, args, toComplete)
 		}
 		return configValueComp(cmd, args, toComplete)

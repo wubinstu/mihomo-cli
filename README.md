@@ -8,7 +8,7 @@
 ```
 /usr/bin/mihomo-cli            CLI 客户端
 /etc/mihomo-cli/              全局配置 (唯一权威: config.toml; 文件头有管理警告, 勿手动编辑)
-/etc/systemd/system/          mihomo-cli.service (journal 日志) + 三个 timer
+/etc/systemd/system/          mihomo-core.service (journal 日志) + 三个 timer (sub/node/resource)
 ```
 
 - `config.toml` 是**唯一权威**：内核参数、定时器、点号路径写的配置段（tun/dns/任意 yaml 键）全在这里；
@@ -69,7 +69,7 @@ log [-f]                                         日志 (journalctl)
 doctor / version / completion                    体检/版本/补全
 ```
 
-全部输出双语：`config set cli-language auto|zh|en`（默认按 locale 回退中文）。
+全部输出双语：`config set cli.language auto|zh|en`（默认按 locale 回退中文）。
 部分子命令（`config set`、`sub add`、`install` 等）会改变系统状态，非 root 执行时自动提权。
 
 ## 配置管理（`config`）
@@ -79,39 +79,46 @@ doctor / version / completion                    体检/版本/补全
 ```
 $ mihomo-cli config get
 [core config]
-KEY                            RUNNING  SETTING   default   STATUS
------------------------------ ------- ---------- --------- ------
-allow-lan                      true     true      false     ✔
-mixed-port                     7890     7890      7890      ✔
-socks-port                     7891     7891      off       ✔
-http-port                      7892     7892      off       ✔
-proxy-mode                     rule     rule      rule      ✔
-ipv6-enabled                   true     true      false     ✔
-log-level                      info     info      info      ✔
-tcp-concurrent                true     true      true      ✔
-unified-delay                 true     true      true      ✔
-keep-alive-interval           30       30        30        ✔
+KEY                          RUNNING SETTING DEFAULT STATE
+---------------------------- ------- ------- ------- -----
+core.allow-lan               true   true    false   ✔
+core.mixed-port              7890   7890    7890    ✔
+core.socks-port              7891   7891    off     ✔
+core.http-port               7892   7892    off     ✔
+core.proxy-mode              rule   rule    rule    ✔
+core.ipv6-enabled            true   true    false   ✔
+core.log-level               info   info    info    ✔
+core.tcp-concurrent          true   true    true    ✔
+core.unified-delay           true   true    true    ✔
+core.keep-alive-interval     30     30      30      ✔
 
 [cli]
-cli-language                   -        auto      auto      -
-github-mirror                  -        auto      auto      -
-test-url                       -        https://www.gstatic.com/generate_204 https://www.gstatic.com/generate_204 -
-test-timeout                   -        5000ms    5000ms    -
-current-profile                -        EDT       -         -
-current-group                  -        🚀 节点选择 -        -
+cli.language                 -      zh      auto    -
+cli.github-mirror            -      auto    auto    -
+cli.test-url                 -      https://www.gstatic.com/gen… https://www.gstatic.com/gen… -
+cli.test-timeout             -      5000    5000    -
+cli.current-profile          -      EDT     /       -
+cli.current-group            -      🚀 节点选择 /      -
 
 [systemd timers]
-sub-auto-update-enabled        enabled  enabled   enabled   ✔
-sub-auto-update-interval       24h      24h       24h       ✔
-node-auto-select-enabled       enabled  enabled   disabled  ✔
-node-auto-select-interval      30m      30m       30m       ✔
-resource-auto-update-enabled   enabled  enabled   disabled  ✔
-resource-auto-update-interval  24h      24h       24h       ✔
-```
+timer.sub-auto-update-enabled      enabled enabled enabled  ✔
+timer.sub-auto-update-interval     24h     24h     24h      ✔
+timer.node-auto-select-enabled     enabled enabled disabled ✔
+timer.node-auto-select-interval    30m     30m     30m      ✔
+timer.resource-auto-update-enabled enabled enabled disabled ✔
+timer.resource-auto-update-interval 24h   24h     24h      ✔
 
-- `KEY` 参数名 · `RUNNING` 内核/timer 实际在用的值 · `SETTING` config.toml 里的值 ·
-  `DEFAULT` 内置默认值 · `STATE` 两者是否一致（绿✔/红✘；服务未运行或该项无运行态时显示 `-`）
-- `config set <key> <value>`：写入 config.toml 并立刻让运行态跟上（`proxy-mode`/`log-level` 走 PATCH 热切换；
+[dns] 与 [tun] 等其余段始终一并显示 (未接管的键 SETTING 显示 -)
+(长值已截断, 完整值: mihomo-cli config get <key>)
+
+- `KEY` 参数名（**统一为 `<段>.<键>`**：`core.*` 内核 config.yaml 顶层键 · `cli.*` CLI 自身 ·
+  `timer.*` systemd · `dns.*`/`tun.*` 内核同名段）· `RUNNING` 内核/timer 实际在用的值 ·
+  `SETTING` config.toml 里的值 · `DEFAULT` 内置默认值 ·
+  `STATE` 两者是否一致（绿✔/红✘；没接管或服务未运行时显示 `-`）
+- 长值按 32 列宽截断加 `…`，完整值用 `config get <key>`（单键输出不截断）
+- `SETTING` 为 `-` 表示**未接管**：不写进内核 yaml，订阅/内核原样保留
+- 只对接管过的键取运行态，所以不会拿订阅/内核的默认值来刷假差异
+- `config set <key> <value>`：写入 config.toml 并立刻让运行态跟上；点号后按 TAB 可继续补全（`proxy-mode`/`log-level` 走 PATCH 热切换；
   端口等需要重建监听的先试热重载，失败才重启；timer 键重写 unit 并启停）
 - `config set <key> <TAB>` 补全全部合法值；`config set <key> -h` 显示单键详情（说明/当前值/默认值/可选值/生效方式）
 - **非法值直接拒绝写入**，并告诉你是哪个键、填了什么、期望什么、合法值有哪些：
@@ -164,9 +171,9 @@ mihomo-cli config unset <key...>         # 撤销接管 (点号路径键回到�
 
 | 类别 | key | 默认 |
 |---|---|---|
-| 内核 | `allow-lan` `mixed-port` `socks-port` `http-port` `proxy-mode` `ipv6-enabled` `log-level` `tcp-concurrent` `unified-delay` `keep-alive-interval` | false / 7890 / off / off / rule / false / info / true / true / 30 |
-| cli | `cli-language` `github-mirror` `test-url` `test-timeout` | auto / auto / gstatic-204 / 5000ms |
-| 定时器 | `sub-auto-update-*` `node-auto-select-*` `resource-auto-update-*` | 24h / 30m / 24h (除 node-auto-select-enabled 默认 false) |
+| 内核 | `core.allow-lan` `core.mixed-port` `core.socks-port` `core.http-port` `core.proxy-mode` `core.ipv6-enabled` `core.log-level` `core.tcp-concurrent` `core.unified-delay` `core.keep-alive-interval` | false / 7890 / off / off / rule / false / info / true / true / 30 |
+| cli | `cli.language` `cli.github-mirror` `cli.test-url` `cli.test-timeout` | auto / auto / gstatic-204 / 5000 |
+| 定时器 | `timer.sub-auto-update-*` `timer.node-auto-select-*` `timer.resource-auto-update-*` | 24h / 30m / 24h (除 node-auto-select-enabled 默认 false) |
 | DNS 段 | `dns.enable` `dns.listen` `dns.enhanced-mode` `dns.fake-ip*` `dns.nameserver` `dns.default-nameserver` `dns.fallback` `dns.use-system-hosts` `dns.ipv6` | 只用过才写入; 见 `config get dns` |
 | TUN 段 | `tun.enable` `tun.stack` `tun.device` `tun.mtu` `tun.dns-hijack` `tun.auto-route` `tun.strict-route` `tun.route-exclude-address` … | 同上; 见 `config get tun` |
 

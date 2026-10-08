@@ -36,23 +36,23 @@ var LangPresets = []string{"auto", "zh", "en"}
 // Keys 全部注册的配置项 (顺序即 config get 的展示顺序)
 var Keys = []Key{
 	// ---- core config: 注入内核 config.yaml (sub=不注入, 跟随订阅) ----
-	{Name: "allow-lan", Section: "core", Kind: KindBool, Def: "false",
+	{Name: "core.allow-lan", Section: "core", Kind: KindBool, Def: "false",
 		Usage: "允许局域网设备使用代理 (监听 0.0.0.0)",
 		Get:   func(s *app.Settings) string { return boolStr(s.AllowLan) },
 		Set:   func(s *app.Settings, v string) error { s.AllowLan = v == "true"; return nil }},
-	{Name: "mixed-port", Section: "core", Kind: KindPort, Def: "7890", Restart: true,
+	{Name: "core.mixed-port", Section: "core", Kind: KindPort, Def: "7890", Restart: true,
 		Usage: "混合代理端口 (http + socks5); off=关闭",
 		Get:   func(s *app.Settings) string { return portStr(s.MixedPort) },
 		Set:   func(s *app.Settings, v string) error { s.MixedPort = v; return nil }},
-	{Name: "socks-port", Section: "core", Kind: KindPort, Def: "off", Restart: true,
+	{Name: "core.socks-port", Section: "core", Kind: KindPort, Def: "off", Restart: true,
 		Usage: "独立 SOCKS5 端口; off=关闭 (mixed-port 已含 socks5)",
 		Get:   func(s *app.Settings) string { return portStr(s.SocksPort) },
 		Set:   func(s *app.Settings, v string) error { s.SocksPort = v; return nil }},
-	{Name: "http-port", Section: "core", Kind: KindPort, Def: "off", Restart: true,
+	{Name: "core.http-port", Section: "core", Kind: KindPort, Def: "off", Restart: true,
 		Usage: "独立 HTTP(S) 代理端口; off=关闭 (mixed-port 已含 http)",
 		Get:   func(s *app.Settings) string { return portStr(s.HTTPPort) },
 		Set:   func(s *app.Settings, v string) error { s.HTTPPort = v; return nil }},
-	{Name: "proxy-mode", Section: "core", Kind: KindEnum, Def: "rule",
+	{Name: "core.proxy-mode", Section: "core", Kind: KindEnum, Def: "rule",
 		Enum:  []string{"rule", "global", "direct", "sub"},
 		Usage: "代理模式; sub=跟随订阅 (热切换)",
 		Get:   func(s *app.Settings) string { return orDef(s.ProxyMode, "rule") },
@@ -64,31 +64,31 @@ var Keys = []Key{
 			}
 			return nil
 		}},
-	{Name: "ipv6-enabled", Section: "core", Kind: KindBool, Def: "false",
+	{Name: "core.ipv6-enabled", Section: "core", Kind: KindBool, Def: "false",
 		Usage: "启用 IPv6 转发",
 		Get:   func(s *app.Settings) string { return boolStr(s.IPV6Enabled) },
 		Set:   func(s *app.Settings, v string) error { s.IPV6Enabled = v == "true"; return nil }},
-	{Name: "log-level", Section: "core", Kind: KindEnum, Def: "info",
+	{Name: "core.log-level", Section: "core", Kind: KindEnum, Def: "info",
 		Enum:  []string{"debug", "info", "warning", "error", "silent", "sub"},
 		Usage: "内核日志等级; sub=跟随订阅 (热切换)",
 		Get:   func(s *app.Settings) string { return orDef(s.LogLevel, "info") },
 		Set:   func(s *app.Settings, v string) error { s.LogLevel = v; return nil }},
-	{Name: "tcp-concurrent", Section: "core", Kind: KindTri, Def: "true",
+	{Name: "core.tcp-concurrent", Section: "core", Kind: KindTri, Def: "true",
 		Usage: "TCP 并发连接 (多路复用, 提速); sub=跟随订阅",
 		Get:   func(s *app.Settings) string { return orDef(s.TCPConcurrent, "true") },
 		Set:   func(s *app.Settings, v string) error { s.TCPConcurrent = v; return nil }},
-	{Name: "unified-delay", Section: "core", Kind: KindTri, Def: "true",
+	{Name: "core.unified-delay", Section: "core", Kind: KindTri, Def: "true",
 		Usage: "统一延迟计算 (URL-Test 更精准); sub=跟随订阅",
 		Get:   func(s *app.Settings) string { return orDef(s.UnifiedDelay, "true") },
 		Set:   func(s *app.Settings, v string) error { s.UnifiedDelay = v; return nil }},
-	{Name: "keep-alive-interval", Section: "core", Kind: KindInt, Def: "30", Min: 1, Max: 600,
+	{Name: "core.keep-alive-interval", Section: "core", Kind: KindInt, Def: "30", Min: 1, Max: 600,
 		Comp:  []string{"sub", "15", "30", "60", "120", "300"},
 		Usage: "长连接保活间隔 (秒); sub=跟随订阅",
 		Get:   func(s *app.Settings) string { return orDef(s.KeepAliveInterval, "30") },
 		Set:   func(s *app.Settings, v string) error { s.KeepAliveInterval = v; return nil }},
 
 	// ---- cli: 只影响 mihomo-cli 自身 ----
-	{Name: "cli-language", Section: "cli", Kind: KindEnum, Def: "auto", Enum: LangPresets,
+	{Name: "cli.language", Section: "cli", Kind: KindEnum, Def: "auto", Enum: LangPresets,
 		Usage: "输出语言; auto=按系统 locale",
 		Get: func(s *app.Settings) string {
 			if s.CLILanguage == "" {
@@ -104,7 +104,7 @@ var Keys = []Key{
 			}
 			return nil
 		}},
-	{Name: "github-mirror", Section: "cli", Kind: KindMirror, Def: "auto", Enum: append([]string{"auto"}, GithubMirrorPresets...),
+	{Name: "cli.github-mirror", Section: "cli", Kind: KindMirror, Def: "auto", Enum: append([]string{"auto"}, GithubMirrorPresets...),
 		Usage: "GitHub 镜像站前缀 (下载内核/资源失败时依次尝试); auto=内置列表",
 		Get: func(s *app.Settings) string {
 			if s.GithubMirror == "" {
@@ -120,11 +120,11 @@ var Keys = []Key{
 			}
 			return nil
 		}},
-	{Name: "test-url", Section: "cli", Kind: KindURL, Def: TestURLPresets[0], Enum: TestURLPresets,
+	{Name: "cli.test-url", Section: "cli", Kind: KindURL, Def: TestURLPresets[0], Enum: TestURLPresets,
 		Usage: "测速/连通性检测 URL (204 端点)",
 		Get:   func(s *app.Settings) string { return s.TestURL },
 		Set:   func(s *app.Settings, v string) error { s.TestURL = v; return nil }},
-	{Name: "test-timeout", Section: "cli", Kind: KindInt, Def: "5000", Min: 100, Max: 60000,
+	{Name: "cli.test-timeout", Section: "cli", Kind: KindInt, Def: "5000", Min: 100, Max: 60000,
 		Comp:  []string{"1000", "3000", "5000", "10000"},
 		Usage: "测速超时 (毫秒)",
 		Get:   func(s *app.Settings) string { return strconv.Itoa(s.TestTimeout) },
@@ -133,19 +133,19 @@ var Keys = []Key{
 			s.TestTimeout = n
 			return nil
 		}},
-	{Name: "current-profile", Section: "cli", Kind: KindState,
+	{Name: "cli.current-profile", Section: "cli", Kind: KindState,
 		Usage: "当前生效订阅 (只读; 用 sub use 切换)",
 		Get:   func(s *app.Settings) string { return orDash(s.CurrentProfile) }},
-	{Name: "current-group", Section: "cli", Kind: KindState,
+	{Name: "cli.current-group", Section: "cli", Kind: KindState,
 		Usage: "当前操作分组 (只读; 用 group use 切换)",
 		Get:   func(s *app.Settings) string { return orDash(s.CurrentGroup) }},
 
 	// ---- systemd timers ----
-	{Name: "sub-auto-update-enabled", Section: "timer", Kind: KindBool, Def: "true",
+	{Name: "timer.sub-auto-update-enabled", Section: "timer", Kind: KindBool, Def: "true",
 		Usage: "订阅定时自动更新",
 		Get:   func(s *app.Settings) string { return boolStr(s.SubAutoUpdateEnabled) },
 		Set:   func(s *app.Settings, v string) error { s.SubAutoUpdateEnabled = v == "true"; return nil }},
-	{Name: "sub-auto-update-interval", Section: "timer", Kind: KindDur, Def: "24h", Min: 60,
+	{Name: "timer.sub-auto-update-interval", Section: "timer", Kind: KindDur, Def: "24h", Min: 60,
 		Usage: "订阅自动更新周期",
 		Get:   func(s *app.Settings) string { return durStr(s.SubAutoUpdateInterval) },
 		Set: func(s *app.Settings, v string) error {
@@ -155,11 +155,11 @@ var Keys = []Key{
 			}
 			return err
 		}},
-	{Name: "node-auto-select-enabled", Section: "timer", Kind: KindBool, Def: "false",
+	{Name: "timer.node-auto-select-enabled", Section: "timer", Kind: KindBool, Def: "false",
 		Usage: "定时对当前分组自动择优",
 		Get:   func(s *app.Settings) string { return boolStr(s.NodeAutoSelectEnabled) },
 		Set:   func(s *app.Settings, v string) error { s.NodeAutoSelectEnabled = v == "true"; return nil }},
-	{Name: "node-auto-select-interval", Section: "timer", Kind: KindDur, Def: "30m", Min: 60,
+	{Name: "timer.node-auto-select-interval", Section: "timer", Kind: KindDur, Def: "30m", Min: 60,
 		Usage: "自动择优周期",
 		Get:   func(s *app.Settings) string { return durStr(s.NodeAutoSelectInterval) },
 		Set: func(s *app.Settings, v string) error {
@@ -169,11 +169,11 @@ var Keys = []Key{
 			}
 			return err
 		}},
-	{Name: "resource-auto-update-enabled", Section: "timer", Kind: KindBool, Def: "false",
+	{Name: "timer.resource-auto-update-enabled", Section: "timer", Kind: KindBool, Def: "false",
 		Usage: "定时自动更新 geo 资源文件",
 		Get:   func(s *app.Settings) string { return boolStr(s.ResourceAutoUpdateEnabled) },
 		Set:   func(s *app.Settings, v string) error { s.ResourceAutoUpdateEnabled = v == "true"; return nil }},
-	{Name: "resource-auto-update-interval", Section: "timer", Kind: KindDur, Def: "24h", Min: 3600,
+	{Name: "timer.resource-auto-update-interval", Section: "timer", Kind: KindDur, Def: "24h", Min: 3600,
 		Usage: "geo 资源更新周期",
 		Get:   func(s *app.Settings) string { return durStr(s.ResourceAutoUpdateInterval) },
 		Set: func(s *app.Settings, v string) error {
@@ -377,6 +377,29 @@ func secUsed(s *app.Settings, section string) bool {
 	}
 	m, ok := s.Overrides[section].(map[string]any)
 	return ok && len(m) > 0
+}
+
+// SecHas 某个点号路径键是否真的被 set 过 (不是"段里有没有别的键")
+func SecHas(s *app.Settings, dotted string) bool {
+	if s.Overrides == nil {
+		return false
+	}
+	parts := strings.Split(dotted, ".")
+	cur := s.Overrides
+	for i, p := range parts {
+		m, ok := cur[p].(map[string]any)
+		if !ok {
+			return false
+		}
+		if _, exists := m[p]; !exists {
+			return false
+		}
+		if i == len(parts)-1 {
+			return true
+		}
+		cur = m
+	}
+	return false
 }
 
 // SectionUsed 段是否被使用过 (对外)

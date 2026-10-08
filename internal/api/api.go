@@ -79,11 +79,11 @@ func (c *Client) PatchConfig(body map[string]any) error {
 
 // Proxy 单个代理(节点或分组)
 type Proxy struct {
-	Name string `json:"name"`
-	Type string `json:"type"`
-	Now  string `json:"now"`
+	Name string   `json:"name"`
+	Type string   `json:"type"`
+	Now  string   `json:"now"`
 	All  []string `json:"all"`
-	UDP  bool   `json:"udp"`
+	UDP  bool     `json:"udp"`
 }
 
 type ProxiesResp struct {
@@ -123,7 +123,7 @@ func (c *Client) GroupDelay(group, testURL string, timeoutMs int) (map[string]in
 }
 
 type ConnInfo struct {
-	ID      string `json:"id"`
+	ID       string `json:"id"`
 	Metadata struct {
 		Network     string `json:"network"`
 		Type        string `json:"type"`
@@ -133,16 +133,16 @@ type ConnInfo struct {
 		Process     string `json:"process"`
 		ProcessPath string `json:"processPath"`
 	} `json:"metadata"`
-	Upload   int64  `json:"upload"`
-	Download int64  `json:"download"`
-	Start    string `json:"start"`
+	Upload   int64    `json:"upload"`
+	Download int64    `json:"download"`
+	Start    string   `json:"start"`
 	Chains   []string `json:"chains"`
-	Rule     string `json:"rule"`
+	Rule     string   `json:"rule"`
 }
 
 type ConnsResp struct {
-	DownloadTotal int64     `json:"downloadTotal"`
-	UploadTotal   int64     `json:"uploadTotal"`
+	DownloadTotal int64      `json:"downloadTotal"`
+	UploadTotal   int64      `json:"uploadTotal"`
 	Connections   []ConnInfo `json:"connections"`
 }
 

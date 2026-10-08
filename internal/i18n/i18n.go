@@ -824,4 +824,8 @@ var en = map[string]string{
 	// ---- v1.3.0 leftovers ----
 	"内核 API 未就绪, 稍后重试":       "the core API is not ready yet; retry in a moment",
 	"没有可回写的运行值(内核 API 未就绪?)": "no running value could be read back (core API not ready?)",
+
+	// ---- v1.4.0 ----
+	"长值已截断, 完整值: mihomo-cli config get <key>":                "long values truncated; full value: mihomo-cli config get <key>",
+	"警告: 未找到 %s, timer 将使用 %s (安装后请重跑 install --systemd)\\n": "Warning: %s not found; timers will use %s (re-run install --systemd after installing)\\n",
 }

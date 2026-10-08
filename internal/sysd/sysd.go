@@ -14,7 +14,27 @@ import (
 	"github.com/wubinstu/mihomo-cli/internal/i18n"
 )
 
-const serviceName = "mihomo-cli.service"
+const serviceName = "mihomo-core.service"
+
+const (
+	subTimerName      = "mihomo-cli-sub.timer"
+	subUnitName       = "mihomo-cli-sub.service"
+	nodeTimerName     = "mihomo-cli-node.timer"
+	nodeUnitName      = "mihomo-cli-node.service"
+	resourceTimerName = "mihomo-cli-resource.timer"
+	resourceUnitName  = "mihomo-cli-resource.service"
+)
+
+// legacyUnits v1.3 及更早的单元名: install 时自动 disable+remove, 保证改名不留下孤儿
+var legacyUnits = []string{
+	"mihomo-cli.service",
+	"mihomo-cli-auto.service",
+	"mihomo-cli-auto.timer",
+}
+
+// cliPath timer 里 ExecStart 用的固定路径: install/uninstall 都是 root-only 且就装在这里,
+// 绝不能用 os.Executable() —— 用户从 /tmp 跑一次二进制就会把 /tmp/mihomo-cli 写进 timer。
+const cliPath = "/usr/bin/mihomo-cli"
 
 // unitDir systemd 单元目录。生产环境固定 /etc/systemd/system;
 // 测试环境 (MIHOMO_CLI_HOME 指向别处) 放沙箱目录, 避免污染真实 systemd 配置。
@@ -107,14 +127,10 @@ func EnsureCapabilities(caps bool) error {
 
 // InstallTimers 安装订阅自动更新与自动选节点的 systemd timer
 func InstallTimers(s *app.Settings) error {
-	self, err := os.Executable()
-	if err != nil {
-		return err
-	}
-	cli, _ := filepath.Abs(self)
+	cli := CLIPath()
 
 	subUnit := fmt.Sprintf(`[Unit]
-Description=mihomo-cli: auto update subscriptions
+Description=mihomo-cli: subscription update timer service
 
 [Service]
 Type=oneshot
@@ -133,14 +149,14 @@ WantedBy=timers.target
 `, systemdDur(s.SubAutoUpdateInterval))
 
 	autoUnit := fmt.Sprintf(`[Unit]
-Description=mihomo-cli: auto select lowest-latency proxy
+Description=mihomo-cli: node auto-select service
 
 [Service]
 Type=oneshot
 ExecStart=%s node auto
 `, cli)
 	resUnit := fmt.Sprintf(`[Unit]
-Description=mihomo-cli: auto update geo resources
+Description=mihomo-cli: geo resource update service
 
 [Service]
 Type=oneshot
@@ -158,61 +174,61 @@ Unit=mihomo-cli-resource.service
 WantedBy=timers.target
 `, systemdDur(s.ResourceAutoUpdateInterval))
 	autoTimer := fmt.Sprintf(`[Unit]
-Description=mihomo-cli: auto select timer
+Description=mihomo-cli: node auto-select timer
 
 [Timer]
 OnBootSec=2min
 OnUnitActiveSec=%s
-Unit=mihomo-cli-auto.service
+Unit=mihomo-cli-node.service
 
 [Install]
 WantedBy=timers.target
 `, systemdDur(s.NodeAutoSelectInterval))
 
-	if err := writeUnit("mihomo-cli-sub.service", subUnit); err != nil {
+	if err := writeUnit(subUnitName, subUnit); err != nil {
 		return err
 	}
-	if err := writeUnit("mihomo-cli-sub.timer", subTimer); err != nil {
+	if err := writeUnit(subTimerName, subTimer); err != nil {
 		return err
 	}
-	if err := writeUnit("mihomo-cli-auto.service", autoUnit); err != nil {
+	if err := writeUnit(nodeUnitName, autoUnit); err != nil {
 		return err
 	}
-	if err := writeUnit("mihomo-cli-auto.timer", autoTimer); err != nil {
+	if err := writeUnit(nodeTimerName, autoTimer); err != nil {
 		return err
 	}
-	if err := writeUnit("mihomo-cli-resource.service", resUnit); err != nil {
+	if err := writeUnit(resourceUnitName, resUnit); err != nil {
 		return err
 	}
-	if err := writeUnit("mihomo-cli-resource.timer", resTimer); err != nil {
+	if err := writeUnit(resourceTimerName, resTimer); err != nil {
 		return err
 	}
 	if err := daemonReload(); err != nil {
 		return err
 	}
 	if s.ResourceAutoUpdateEnabled {
-		_, err = runRoot("systemctl", "enable", "--now", "mihomo-cli-resource.timer")
+		if _, err := runRoot("systemctl", "enable", "--now", resourceTimerName); err != nil {
+			return err
+		}
 	} else {
-		_, _ = runRoot("systemctl", "disable", "--now", "mihomo-cli-resource.timer")
-	}
-	if err != nil {
-		return err
+		_, _ = runRoot("systemctl", "disable", "--now", resourceTimerName)
 	}
 	// 按设置启停
 	if s.SubAutoUpdateEnabled {
-		_, err = runRoot("systemctl", "enable", "--now", "mihomo-cli-sub.timer")
+		if _, err := runRoot("systemctl", "enable", "--now", subTimerName); err != nil {
+			return err
+		}
 	} else {
-		_, _ = runRoot("systemctl", "disable", "--now", "mihomo-cli-sub.timer")
-	}
-	if err != nil {
-		return err
+		_, _ = runRoot("systemctl", "disable", "--now", subTimerName)
 	}
 	if s.NodeAutoSelectEnabled {
-		_, err = runRoot("systemctl", "enable", "--now", "mihomo-cli-auto.timer")
+		if _, err := runRoot("systemctl", "enable", "--now", nodeTimerName); err != nil {
+			return err
+		}
 	} else {
-		_, _ = runRoot("systemctl", "disable", "--now", "mihomo-cli-auto.timer")
+		_, _ = runRoot("systemctl", "disable", "--now", nodeTimerName)
 	}
-	return err
+	return nil
 }
 
 func systemdDur(d time.Duration) string {
@@ -222,17 +238,56 @@ func systemdDur(d time.Duration) string {
 // InstallTimersQuiet 同 InstallTimers, 失败仅返回错误 (不打印)
 func InstallTimersQuiet(s *app.Settings) error { return InstallTimers(s) }
 
-// RemoveAll 卸载全部单元文件
+// RemoveAll 卸载全部单元文件 (新旧名字都清)
 func RemoveAll() {
-	_, _ = runRoot("systemctl", "disable", "--now", serviceName, "mihomo-cli-sub.timer", "mihomo-cli-auto.timer", "mihomo-cli-resource.timer")
-	removeUnit(serviceName)
-	removeUnit("mihomo-cli-sub.service")
-	removeUnit("mihomo-cli-sub.timer")
-	removeUnit("mihomo-cli-auto.service")
-	removeUnit("mihomo-cli-resource.timer")
-	removeUnit("mihomo-cli-resource.service")
-	removeUnit("mihomo-cli-auto.timer")
+	_, _ = runRoot("systemctl", "disable", "--now", serviceName, subTimerName, nodeTimerName, resourceTimerName)
+	_, _ = runRoot("systemctl", append([]string{"disable", "--now"}, legacyUnits...)...)
+	for _, u := range append([]string{serviceName, subUnitName, subTimerName,
+		nodeUnitName, nodeTimerName, resourceUnitName, resourceTimerName}, legacyUnits...) {
+		removeUnit(u)
+	}
 	_ = daemonReload()
+}
+
+// ServiceName 主服务单元名 (外部引用用)
+func ServiceName() string { return serviceName }
+
+// SubTimerName / NodeTimerName / ResourceTimerName 三个定时器单元名
+func SubTimerName() string      { return subTimerName }
+func NodeTimerName() string     { return nodeTimerName }
+func ResourceTimerName() string { return resourceTimerName }
+
+// DropLegacyUnits 清理 v1.3 及更早的单元名 (install 时调用, 幂等)
+func DropLegacyUnits() {
+	var found []string
+	for _, u := range legacyUnits {
+		if _, err := os.Stat(filepath.Join(unitDir, u)); err == nil {
+			found = append(found, u)
+		}
+	}
+	if len(found) == 0 {
+		return
+	}
+	_, _ = runRoot("systemctl", append([]string{"disable", "--now"}, found...)...)
+	for _, u := range found {
+		removeUnit(u)
+	}
+	_ = daemonReload()
+}
+
+// CLIPath timer 里 ExecStart 的路径: 固定 /usr/bin/mihomo-cli,
+// 该文件不存在(开发/沙箱)时才回退到当前可执行文件并告警。
+func CLIPath() string {
+	if _, err := os.Stat(cliPath); err == nil {
+		return cliPath
+	}
+	self, err := os.Executable()
+	if err != nil {
+		return cliPath
+	}
+	abs, _ := filepath.Abs(self)
+	fmt.Fprintf(os.Stderr, i18n.T("警告: 未找到 %s, timer 将使用 %s (安装后请重跑 install --systemd)\n"), cliPath, abs)
+	return abs
 }
 
 func Service(action string) error {
@@ -254,6 +309,44 @@ func TimerEnabled(name string) bool {
 	}
 	out, err := cmd.Output()
 	return err == nil && strings.TrimSpace(string(out)) == "enabled"
+}
+
+// TimerLast 读取 timer 上一次实际触发时间 (systemd 权威源)。
+// oneshot 成功或失败 systemd 都会更新它, 所以它比"我们自己存在 config.toml 里的
+// last_run"更可靠 —— 后者在任务失败时不写回, 会让"下次剩余时间"一直停在 0m。
+// 读不到(未安装/被禁用/从未触发)返回零值。
+func TimerLast(name string) time.Time {
+	cmd := exec.Command("systemctl", "show", name, "-p", "LastTriggerUSec", "--value")
+	if os.Geteuid() != 0 {
+		cmd = exec.Command("sudo", "-n", "systemctl", "show", name, "-p", "LastTriggerUSec", "--value")
+	}
+	out, err := cmd.Output()
+	if err != nil {
+		return time.Time{}
+	}
+	return parseSystemdTime(strings.TrimSpace(string(out)))
+}
+
+// parseSystemdTime 解析 systemctl show 的时间输出: "Thu 2026-10-08 09:54:51 CST"
+// (也可能是裸微秒数 / "n/a" / 空)
+func parseSystemdTime(v string) time.Time {
+	if v == "" || v == "n/a" || v == "0" {
+		return time.Time{}
+	}
+	if us, err := strconv.ParseInt(v, 10, 64); err == nil && us > 0 {
+		return time.UnixMicro(us)
+	}
+	for _, layout := range []string{
+		"Mon 2006-01-02 15:04:05 MST",
+		"Mon 2006-01-02 15:04:05 -0700",
+		"2006-01-02 15:04:05 MST",
+		"Mon Jan _2 15:04:05 2006",
+	} {
+		if t, err := time.ParseInLocation(layout, v, time.Local); err == nil {
+			return t
+		}
+	}
+	return time.Time{}
 }
 
 // TimerInterval 读取 timer 的实际执行周期 (OnUnitActiveSec), 读不到返回 "-"

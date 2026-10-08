@@ -3,6 +3,7 @@ package cfg
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/wubinstu/mihomo-cli/internal/app"
 	"github.com/wubinstu/mihomo-cli/internal/i18n"
@@ -28,10 +29,10 @@ func TestKeysUniqueAndComplete(t *testing.T) {
 			t.Fatalf("%s: no Usage", k.Name)
 		}
 	}
-	if Lookup("mixed-port") == nil {
-		t.Fatal("mixed-port must be registered")
+	if Lookup("core.mixed-port") == nil {
+		t.Fatal("core.mixed-port must be registered")
 	}
-	if Lookup("tun.enable") == nil || Lookup("dns.enable") == nil {
+	if Lookup("tun.enable") == nil || Lookup("dns.enable") == nil || Lookup("cli.language") == nil || Lookup("timer.sub-auto-update-enabled") == nil {
 		t.Fatal("dotted keys must be registered")
 	}
 }
@@ -127,7 +128,7 @@ func TestDefaultsAndCompletionLegal(t *testing.T) {
 func TestPortAliases(t *testing.T) {
 	s := app.DefaultSettings()
 	for _, v := range []string{"off", "0", "none", "-"} {
-		k := Lookup("socks-port")
+		k := Lookup("core.socks-port")
 		if _, err := k.Parse(v); err != nil {
 			t.Fatalf("socks-port should accept %q: %v", v, err)
 		}
@@ -274,6 +275,8 @@ func TestCompleteKeysTwoLevels(t *testing.T) {
 
 // Every Usage 字段值必须是 i18n en 表里的 key (否则 en 模式会漏中文)
 func TestRegistryUsageTranslated(t *testing.T) {
+	i18n.Set("en") // T() 只在 en 模式下查表
+	defer i18n.Set("zh")
 	for _, k := range Keys {
 		if k.Usage == "" {
 			t.Errorf("%s: empty usage", k.Name)
@@ -286,6 +289,9 @@ func TestRegistryUsageTranslated(t *testing.T) {
 		if hasCJK(k.Usage) && i18n.T(k.Usage) == k.Usage {
 			t.Errorf("%s: usage %q is not in the en table (leaks Chinese in en mode)", k.Name, k.Usage)
 		}
+		if !hasCJK(k.Usage) && i18n.T(k.Usage) != k.Usage {
+			t.Errorf("%s: usage %q looks English but the en table remaps it to %q", k.Name, k.Usage, i18n.T(k.Usage))
+		}
 	}
 }
 
@@ -296,4 +302,48 @@ func hasCJK(s string) bool {
 		}
 	}
 	return false
+}
+
+// YAMLPath: core 段去前缀 + 内核里的异名键; dns/tun 原样嵌套
+func TestYAMLPath(t *testing.T) {
+	cases := map[string]string{
+		"core.proxy-mode":           "mode",
+		"core.ipv6-enabled":         "ipv6",
+		"core.http-port":            "port",
+		"core.mixed-port":           "mixed-port",
+		"core.allow-lan":            "allow-lan",
+		"core.keep-alive-interval":  "keep-alive-interval",
+		"dns.enable":                "dns.enable",
+		"dns.fake-ip-range":         "dns.fake-ip-range",
+		"tun.stack":                 "tun.stack",
+		"tun.route-exclude-address": "tun.route-exclude-address",
+	}
+	for in, want := range cases {
+		if got := YAMLPath(in); got != want {
+			t.Errorf("YAMLPath(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// DurCountdown 一律截断到分钟 (用户 v0.6 定的规矩)
+func TestDurCountdown(t *testing.T) {
+	cases := map[string]string{
+		"24h0m0s":  "24h",
+		"23h40m0s": "23h40m",
+		"30m0s":    "30m",
+		"29m2.8s":  "29m",
+		"59s":      "<1m",
+		"0s":       "<1m",
+		"-5m":      "<1m",
+		"168h0m0s": "168h",
+	}
+	for in, want := range cases {
+		d, err := time.ParseDuration(in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := DurCountdown(d); got != want {
+			t.Errorf("DurCountdown(%s) = %q, want %q", in, got, want)
+		}
+	}
 }

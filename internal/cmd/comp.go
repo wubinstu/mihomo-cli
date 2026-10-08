@@ -9,6 +9,7 @@ import (
 
 	"github.com/wubinstu/mihomo-cli/internal/api"
 	"github.com/wubinstu/mihomo-cli/internal/app"
+	"github.com/wubinstu/mihomo-cli/internal/cfg"
 	"github.com/wubinstu/mihomo-cli/internal/subs"
 )
 
@@ -217,3 +218,14 @@ var (
 	_ = subs.Sanitize
 	_ = app.BaseDir
 )
+
+// keyCompletion 键名补全的统一入口: 处理好"半截点号路径"的情况。
+// 用户敲 `config set core. <TAB>`(点号后带空格)时, cobra 把 "core." 当作已输入的参数、
+// toComplete 为空, 此时必须仍然在补键名, 否则会掉进"补值"分支而什么都补不出来。
+func keyCompletion(args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	prefix := toComplete
+	if n := len(args); n > 0 && strings.HasSuffix(args[n-1], ".") {
+		prefix = args[n-1] + toComplete
+	}
+	return withNoFile(prefixFilter(cfg.CompleteKeys(prefix), prefix))
+}

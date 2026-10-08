@@ -152,6 +152,7 @@ mihomo-cli install [--proxy URL] [--mirror URL] # ` + T("一次性下载代理/�
 		// --systemd: 按 config.toml 重新生成全部单元
 		if installSystemd {
 			fmt.Println(T("注册 systemd 服务") + " ...")
+			sysd.DropLegacyUnits() // v1.3 及更早的单元名 (mihomo-cli.service / mihomo-cli-auto.*)
 			if err := sysd.InstallService(tunOn(s)); err != nil {
 				return err
 			}
@@ -170,7 +171,7 @@ mihomo-cli install [--proxy URL] [--mirror URL] # ` + T("一次性下载代理/�
 		app.HardenPerms()
 		// 结束检查: 内核+systemd 就绪则确保服务运行 (空配置即全 DIRECT)
 		if _, err := os.Stat(app.CoreBin); err == nil {
-			if _, err := os.Stat("/etc/systemd/system/mihomo-cli.service"); err == nil {
+			if _, err := os.Stat("/etc/systemd/system/" + sysd.ServiceName()); err == nil {
 				if err := render.Generate(s); err == nil && !sysd.IsActive() {
 					if err := sysd.Service("start"); err == nil {
 						fmt.Println(T("服务已自动拉起") + " (" + T("无订阅时为最小配置, 全部流量 DIRECT") + ")")

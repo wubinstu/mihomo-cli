@@ -19,19 +19,26 @@ import (
 type Live struct {
 	cfg     map[string]any    // /configs 原文
 	timers  map[string]string // timer 键名 → 运行值
-	active  map[string]bool   // 段是否被 CLI 管理 (dns/tun 只在使用过才算)
+	managed map[string]bool   // 该键是否被 CLI 接管 (决定要不要取运行态)
 	running bool              // 服务是否在运行
 }
 
 // Fetch 读取运行态; 服务未运行时所有值都视为 "-"
 func Fetch(s *app.Settings) *Live {
-	l := &Live{timers: map[string]string{}, running: sysd.IsActive(), active: map[string]bool{}}
-	// CLI 未接管过的段(tun/dns)没有运行态概念: 内核/订阅自带的默认值不算差异
-	for _, sec := range []string{"dns", "tun"} {
-		l.active[sec] = SectionUsed(s, sec)
-	}
+	l := &Live{timers: map[string]string{}, running: sysd.IsActive(), managed: map[string]bool{}}
 	if !l.running {
 		return l
+	}
+	// 只对"CLI 真正接管了的键"取运行态: 没 set 过的 dns/tun 键如果也去比,
+	// 就是拿内核/订阅的默认值和我们的默认值比, 会刷出一片假差异。
+	for _, k := range Keys {
+		if k.Managed() {
+			l.managed[k.Name] = true
+			continue
+		}
+		if keyManaged(s, k) {
+			l.managed[k.Name] = true
+		}
 	}
 	var m map[string]any
 	if err := api.New(s).GetJSON("/configs", &m); err == nil {
@@ -46,6 +53,17 @@ func Fetch(s *app.Settings) *Live {
 	return l
 }
 
+// keyManaged 该点号路径键是否被 set 过 (这个键本身, 不是"段里有没有别的键")
+func keyManaged(s *app.Settings, k Key) bool {
+	if k.Section == "dns" {
+		switch k.Name {
+		case "dns.enable", "dns.nameserver":
+			return len(s.DNSServers) > 0 || SecHas(s, "dns.enable") || SecHas(s, "dns.nameserver")
+		}
+	}
+	return SecHas(s, k.Name)
+}
+
 func enabledStr(on bool) string {
 	if on {
 		return "enabled"
@@ -56,20 +74,25 @@ func enabledStr(on bool) string {
 // Running 服务是否在运行
 func (l *Live) Running() bool { return l != nil && l.running }
 
-// YAMLPath 注册键名 → 内核 yaml/API 里的键名 (点号路径逐段映射)
+// YAMLPath 注册键名 → 内核 yaml/API 里的键名。
+// core 段的键就是内核顶层键 (去掉段前缀); 其余段(dns/tun)的点号路径原样对应嵌套结构。
+// 少量键在内核里叫别的名字: proxy-mode→mode, ipv6-enabled→ipv6, http-port→port。
 func YAMLPath(name string) string {
-	if i := strings.Index(name, "."); i > 0 {
-		return YAMLPath(name[:i]) + "." + name[i+1:]
+	parts := strings.Split(name, ".")
+	if len(parts) >= 2 && parts[0] == "core" {
+		parts = parts[1:]
 	}
-	switch name {
-	case "proxy-mode":
-		return "mode"
-	case "ipv6-enabled":
-		return "ipv6"
-	case "http-port":
-		return "port" // 内核里叫 port, 不叫 http-port
+	for i, p := range parts {
+		switch p {
+		case "proxy-mode":
+			parts[i] = "mode"
+		case "ipv6-enabled":
+			parts[i] = "ipv6"
+		case "http-port":
+			parts[i] = "port"
+		}
 	}
-	return name
+	return strings.Join(parts, ".")
 }
 
 // Value 某键的运行态值; "-" = 该项没有运行态概念(或服务未运行)
@@ -77,14 +100,12 @@ func (l *Live) Value(k Key) string {
 	if !l.Running() {
 		return "-"
 	}
+	if !l.managed[k.Name] {
+		return "-" // 未接管: 不与运行态比较 (订阅/内核爱怎样怎样)
+	}
 	switch k.Section {
 	case "cli":
 		return "-"
-	case "dns", "tun":
-		// 段未被 CLI 接管时不与运行态比较 (否则订阅/内核默认值会被误报成"不同")
-		if !l.active[k.Section] {
-			return "-"
-		}
 	case "timer":
 		if v, ok := l.timers[k.Name]; ok {
 			return v

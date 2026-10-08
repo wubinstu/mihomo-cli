@@ -224,3 +224,28 @@ func printRow(w io.Writer, r []string, widths []int, gap int) {
 	}
 	fmt.Fprintln(w, b.String())
 }
+
+// MaxCellWidth 表格单元格的最大显示宽度: 超过就截断加省略号,
+// 否则 test-url / tun.route-exclude-address 这类长值会把表格撑爆。
+const MaxCellWidth = 32
+
+// Truncate 超过宽度的值截断为 "前缀…"; 真的截断时把 *trunc 置 true (调用方用来决定是否提示)
+func Truncate(s string, max int, trunc *bool) string {
+	if s == "" || Width(s) <= max {
+		return s
+	}
+	if trunc != nil {
+		*trunc = true
+	}
+	out := ""
+	w := 0
+	for _, r := range s {
+		rw := Width(string(r))
+		if w+rw > max-1 { // 留 1 格给省略号
+			break
+		}
+		out += string(r)
+		w += rw
+	}
+	return out + "…"
+}

@@ -425,8 +425,26 @@ func durCandidates(k Key) []string {
 	return out
 }
 
-// DurHuman 紧凑时长: 不四舍五入, 只把整量的部分缩短
-// (24h / 12h / 30m / 1m30s / 45s —— 绝不把 90s 显示成 1m 这种有损写法)
+// DurCountdown 倒计时显示: 一律截断到分钟 (用户 v0.6 明确要求"23h40m"而不是"23h40m0s");
+// 与 DurHuman 的区别就在这里 —— 倒计时不需要秒级精度, 配置值需要。
+func DurCountdown(d time.Duration) string {
+	if d < 0 {
+		d = 0
+	}
+	if d < time.Minute {
+		return "<1m"
+	}
+	s := int(d.Minutes()) * 60
+	switch {
+	case s%3600 == 0:
+		return fmt.Sprintf("%dh", s/3600)
+	case s < 3600:
+		return fmt.Sprintf("%dm", s/60)
+	default:
+		return fmt.Sprintf("%dh%dm", s/3600, (s%3600)/60)
+	}
+}
+
 // DurHuman 紧凑时长: 不四舍五入, 只把整量的部分缩短
 // (24h / 12h / 30m / 1m30s / 45s —— 绝不把 90s 显示成 1m 这种有损写法)
 func DurHuman(d time.Duration) string {

@@ -27,7 +27,7 @@ var logCmd = &cobra.Command{
 	Use:   "log",
 	Short: T("查看内核日志 (-f 跟随)"),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		jargs := []string{"-u", "mihomo-cli", "--no-pager", "-n", "100"}
+		jargs := []string{"-u", sysd.ServiceName(), "--no-pager", "-n", "100"}
 		if logFollow {
 			jargs = append(jargs, "-f")
 		}
@@ -137,11 +137,12 @@ var doctorCmd = &cobra.Command{
 
 		// 顺序固定为 Res → Sub → Node (与 status 一致)
 		rows = append(rows,
-			checkRow{true, T("Res auto-update"), timerText(s.ResourceAutoUpdateEnabled, s.ResourceAutoUpdateInterval)},
-			checkRow{sysd.TimerEnabled("mihomo-cli-sub.timer") == s.SubAutoUpdateEnabled, T("Sub auto-update"),
-				timerText(s.SubAutoUpdateEnabled, s.SubAutoUpdateInterval)},
-			checkRow{sysd.TimerEnabled("mihomo-cli-auto.timer") == s.NodeAutoSelectEnabled, T("Node auto-select"),
-				timerText(s.NodeAutoSelectEnabled, s.NodeAutoSelectInterval)},
+			checkRow{true, T("Res auto-update"),
+				timerText(sysd.ResourceTimerName(), s.ResourceAutoUpdateEnabled, s.ResourceAutoUpdateInterval, s.ResourceLastRun)},
+			checkRow{sysd.TimerEnabled(sysd.SubTimerName()) == s.SubAutoUpdateEnabled, T("Sub auto-update"),
+				timerText(sysd.SubTimerName(), s.SubAutoUpdateEnabled, s.SubAutoUpdateInterval, s.Current().UpdatedAt)},
+			checkRow{sysd.TimerEnabled(sysd.NodeTimerName()) == s.NodeAutoSelectEnabled, T("Node auto-select"),
+				timerText(sysd.NodeTimerName(), s.NodeAutoSelectEnabled, s.NodeAutoSelectInterval, s.AutoSelectLastRun)},
 		)
 
 		ui.TableSections(os.Stdout, []string{"", T("检查项"), T("详情")},
@@ -224,7 +225,7 @@ func configCheckRow(s *app.Settings) []checkRow {
 	}
 	if len(diff) > 0 {
 		return []checkRow{valuesRow, {false, T("Config file"),
-			fmt.Sprintf("%d %s: %s", len(diff), T("项与运行态不同"), strings.Join(diff, ", ")) +
+			fmt.Sprintf("%d %s", len(diff), T("项与运行态不同")) +
 				" (" + T("config update-service") + ")"}}
 	}
 	return []checkRow{valuesRow, {true, T("Config file"), T("与运行态完全一致")}}
@@ -248,11 +249,27 @@ func badConfigValues(s *app.Settings) []string {
 	return out
 }
 
-func timerText(on bool, ivl time.Duration) string {
+// timerText 三个定时任务统一的展示: 已启用 | 上次 X | 下次 Y
+// 上次/下次以 systemd 的 LastTriggerUSec 为准 (权威, oneshot 失败也会更新),
+// 读不到才回退 config.toml 里的时间戳 —— 后者在任务失败时不写回,
+// 会让"下次"一直停在 0m (v1.3 的已知问题, 用户实测遇到过)。
+func timerText(unit string, on bool, ivl time.Duration, storedLast time.Time) string {
+	state := T("已停用")
 	if on {
-		return fmt.Sprintf("%s (%s)", T("已启用"), cfg.DurHuman(ivl))
+		state = T("已启用")
 	}
-	return fmt.Sprintf("%s (%s)", T("已停用"), cfg.DurHuman(ivl))
+	last := sysd.TimerLast(unit)
+	if last.IsZero() {
+		last = storedLast
+	}
+	if last.IsZero() {
+		return fmt.Sprintf("%s | %s -", state, T("上次"))
+	}
+	out := fmt.Sprintf("%s | %s %s", state, T("上次"), humanTime(last))
+	if on {
+		out += fmt.Sprintf(" | %s %s", T("下次"), cfg.DurCountdown(time.Until(last.Add(ivl))))
+	}
+	return out
 }
 
 func dashIf(s string, err error) string {
@@ -299,7 +316,7 @@ func lanIP() string {
 
 // ---- version ----
 
-var Version = "1.3.0"
+var Version = "1.4.0"
 
 var versionCmd = &cobra.Command{
 	Use:   "version",

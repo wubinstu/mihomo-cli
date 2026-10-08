@@ -119,7 +119,7 @@ func Generate(s *app.Settings) error {
 		delete(cfgMap, "bind-address")
 	}
 	// 三态键: "sub" = 不注入(跟随订阅); 空值 = 默认值 (CLI 权威, 照样注入)
-	for _, name := range []string{"proxy-mode", "log-level", "tcp-concurrent", "unified-delay", "keep-alive-interval"} {
+	for _, name := range []string{"core.proxy-mode", "core.log-level", "core.tcp-concurrent", "core.unified-delay", "core.keep-alive-interval"} {
 		k := cfg.Lookup(name)
 		if k == nil {
 			continue

@@ -41,20 +41,29 @@ expect() { # expect <期望子串> <args...>
 
 # --- 空命令行 (v1.2 及更早在这里漏出 config.toml 的根因) ---
 check ""
-# --- 两层 key 补全 ---
+# --- 两层 key 补全 (含"点号后带空格"的半截路径) ---
 check "config" "set" ""
-expect "allow-lan"    "config" "set" ""
-expect "dns.enable"   "config" "set" "dns."
-expect "tun.stack"    "config" "set" "tun."
-expect "sub-auto-update-enabled" "config" "set" ""
+expect "core.allow-lan"   "config" "set" ""
+expect "dns.enable"        "config" "set" "dns."
+expect "tun.stack"         "config" "set" "tun."
+expect "cli.language"      "config" "set" "cli."
+expect "timer.sub-auto-update-enabled" "config" "set" "timer."
 # --- 每个 key 的值补全都必须有候选 ---
-for k in allow-lan mixed-port socks-port http-port proxy-mode ipv6-enabled log-level \
-         tcp-concurrent unified-delay keep-alive-interval cli-language github-mirror \
-         test-url test-timeout sub-auto-update-enabled sub-auto-update-interval \
-         node-auto-select-enabled node-auto-select-interval \
-         resource-auto-update-enabled resource-auto-update-interval; do
+for k in core.allow-lan core.mixed-port core.socks-port core.http-port core.proxy-mode \
+         core.ipv6-enabled core.log-level core.tcp-concurrent core.unified-delay \
+         core.keep-alive-interval cli.language cli.github-mirror cli.test-url cli.test-timeout \
+         timer.sub-auto-update-enabled timer.sub-auto-update-interval \
+         timer.node-auto-select-enabled timer.node-auto-select-interval \
+         timer.resource-auto-update-enabled timer.resource-auto-update-interval; do
   expect "." "config" "set" "$k" ""
 done
+# --- 点号后带空格也要能补出键名 (v1.4 修过的分支) ---
+expect "core.allow-lan" "config" "set" "core." ""
+expect "cli.language"    "config" "set" "cli." ""
+expect "tun.enable"      "config" "set" "tun." ""
+expect "core.allow-lan" "config" "get" "core." ""
+expect "core.allow-lan" "config" "unset" "core." ""
+
 # --- 其余命令树: 一律不落文件 ---
 for p in "sub" "sub add" "sub use " "sub rm " "group" "group use " "node" "node use " \
          "rule" "rule add" "rule enable " "top" "top kill " "dns" "dns use " "tun" \
