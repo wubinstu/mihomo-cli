@@ -21,12 +21,14 @@ var resourceCmd = &cobra.Command{
 	Short: T("资源管理: core/mmdb/asn/geoip/geosite"),
 	Long: T("管理内核与 geo 数据资源; 数据资源支持自动更新 (resource-auto-update-*)。") + `
 
-mihomo-cli resource core version                 # ` + T("已安装内核版本") + `
-mihomo-cli resource core upgrade [<spec>]        # ` + T("切换内核版本 (规格同 install --core, 可新可旧)") + `
-mihomo-cli resource core rollback                # ` + T("回滚到上一个装过的版本 (本地版本栈, 不联网)") + `
-mihomo-cli resource core history                 # ` + T("查看本地版本栈") + `
-mihomo-cli resource mmdb|asn|geoip|geosite info|update
-mihomo-cli resource update-all                   # ` + T("更新全部数据资源 (定时任务复用)") + `
+` + ui.ExampleLines([][2]string{
+		{"mihomo-cli resource core version", T("已安装内核版本")},
+		{"mihomo-cli resource core upgrade [<spec>]", T("切换内核版本 (规格同 install --core, 可新可旧)")},
+		{"mihomo-cli resource core rollback", T("回滚到上一个装过的版本 (本地版本栈, 不联网)")},
+		{"mihomo-cli resource core history", T("查看本地版本栈")},
+		{"mihomo-cli resource mmdb|asn|geoip|geosite info|update", T("查看/更新单个数据资源")},
+		{"mihomo-cli resource update-all", T("更新全部数据资源 (定时任务复用)")},
+	}, 2) + `
 
 ` + T("内核规格 <spec> = [风味][:版本], 平台自动探测并被记住:") + `
   auto                       ` + T("自动探测风味, 装最新版") + `
@@ -147,7 +149,7 @@ func currentFlavorText() string {
 	if err != nil {
 		return "-"
 	}
-	return orFlavor(s.CoreFlavor)
+	return orFlavor(s.Flavor)
 }
 
 func orFlavor(f string) string {

@@ -173,11 +173,13 @@ func TableSections(w io.Writer, header []string, secs []Section, gap int) {
 	// 全局列宽
 	all := append([][]string{header}, rowsOf(secs)...)
 	widths := cols(all)
+	// 分隔线的列间空格必须和行内 pad 的增量一致 (都是 gap): 用 gap-1 会让
+	// 每一列的分隔线相对表头累积左移 1, 到最后一列就差出 (列数-1) 个空格。
 	line := func() {
 		var b strings.Builder
 		for i := range widths {
 			if i > 0 {
-				b.WriteString(strings.Repeat(" ", gap-1))
+				b.WriteString(strings.Repeat(" ", gap))
 			}
 			b.WriteString(strings.Repeat("-", widths[i]))
 		}
@@ -248,4 +250,80 @@ func Truncate(s string, max int, trunc *bool) string {
 		w += rw
 	}
 	return out + "…"
+}
+
+// ---- 帮助/示例排版用的宽度感知工具 ----
+
+// Pad 把 s 补齐到 w 个显示宽度 (中文/emoji 都按终端实际占位算)
+func Pad(s string, w int) string {
+	d := w - Width(s)
+	if d < 1 {
+		d = 1
+	}
+	return s + strings.Repeat(" ", d)
+}
+
+// Align2 两列对齐: 第一列按所有行里的最大显示宽度对齐, 列间 gap 个空格
+func Align2(rows [][2]string, gap int) string {
+	if gap < 1 {
+		gap = 1
+	}
+	w := 0
+	for _, r := range rows {
+		if x := Width(r[0]); x > w {
+			w = x
+		}
+	}
+	var b strings.Builder
+	for _, r := range rows {
+		b.WriteString(Pad(r[0], w+gap))
+		b.WriteString(r[1])
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+// ExampleLines "命令 # 注释" 示例块: 命令列对齐, 注释列统一起点
+// (install/uninstall/resource/dns/tun 的帮助都用它, 不再手敲空格)
+func ExampleLines(items [][2]string, gap int) string {
+	if gap < 1 {
+		gap = 1
+	}
+	w := 0
+	for _, it := range items {
+		if x := Width(it[0]); x > w {
+			w = x
+		}
+	}
+	var b strings.Builder
+	for _, it := range items {
+		b.WriteString(Pad(it[0], w+gap))
+		b.WriteString("# ")
+		b.WriteString(it[1])
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+// Wrap 按显示宽度折行 (帮助文本用; 不截断, 只在单词/标点边界换行)
+func Wrap(s string, max int) string {
+	if max < 8 || Width(s) <= max {
+		return s
+	}
+	var lines []string
+	var cur string
+	curW := 0
+	for _, r := range s {
+		rw := Width(string(r))
+		if curW+rw > max && cur != "" {
+			lines = append(lines, cur)
+			cur, curW = "", 0
+		}
+		cur += string(r)
+		curW += rw
+	}
+	if cur != "" {
+		lines = append(lines, cur)
+	}
+	return strings.Join(lines, "\n")
 }

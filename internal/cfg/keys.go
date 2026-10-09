@@ -43,23 +43,101 @@ const (
 	KindState                // 只读状态展示
 )
 
+// ValueDoc 一个取值的含义 (详版帮助用)
+type ValueDoc struct {
+	Name string // "rule" / "off" / "sub"
+	Desc string // 中文说明 (en 由 i18n 查表)
+}
+
 // Key 一个配置项的完整描述
 type Key struct {
-	Name     string // "mixed-port" / "tun.enable"
+	Name     string // "core.mixed-port" / "tun.enable"
 	Section  string // core | cli | timer | dns | tun
 	Kind     Kind
-	Def      string   // 默认值 (展示与 reset-default); "" = 无默认值
-	Enum     []string // KindEnum/KindTri/KindPort 的合法值 (sub/off 由 Kind 决定)
-	Usage    string   // 中文说明 (en 由 i18n 查表)
-	Comp     []string // 显式补全候选 (覆盖 Kind 的通用候选)
-	Min, Max int      // KindInt/KindDur 的取值范围 (Dur 用秒)
-	Restart  bool     // true = 改动必须重启服务; false = reload/PATCH 即可
+	Def      string                                      // 默认值 (展示与 reset-default); "" = 无默认值
+	Enum     []string                                    // KindEnum/KindTri/KindPort 的合法值 (sub/off 由 Kind 决定)
+	Usage    string                                      // 一句话说明 (简版帮助/列表)
+	Detail   string                                      // 详细说明 (详版帮助; 空则用 Usage)
+	Values   []ValueDoc                                  // 每个取值的含义 (详版帮助; 空则按 Kind 自动生成)
+	Example  string                                      // 用法示例 (详版帮助)
+	Resolve  func(*app.Settings, string) (string, error) // 值域扩展 (预设名→真实值), 在 Parse 之前跑
+	Comp     []string                                    // 显式补全候选 (覆盖 Kind 的通用候选)
+	CompFn   func() []string                             // 动态补全候选 (预设名由 cmd 包延迟注入)
+	Min, Max int                                         // KindInt/KindDur 的取值范围 (Dur 用秒)
+	Restart  bool                                        // true = 改动必须重启服务; false = reload/PATCH 即可
 	Get      func(*app.Settings) string
 	Set      func(*app.Settings, string) error
 }
 
-// Desc 本地化后的说明
+// Desc 本地化后的一句话说明
 func (k Key) Desc() string { return i18n.T(k.Usage) }
+
+// LongDesc 本地化后的详细说明 (没有单独写就用一句话说明)
+func (k Key) LongDesc() string {
+	if k.Detail != "" {
+		return i18n.T(k.Detail)
+	}
+	return i18n.T(k.Usage)
+}
+
+// Spec 简版帮助里的紧凑取值形态 (长枚举截断, 完整列表只在详版)
+func (k Key) Spec() string {
+	switch k.Kind {
+	case KindBool:
+		return "true|false"
+	case KindTri:
+		return "true|false|sub"
+	case KindPort:
+		return "off|sub|port"
+	case KindEnum:
+		if len(k.Enum) <= 3 {
+			return strings.Join(k.Enum, "|")
+		}
+		return strings.Join(k.Enum[:3], "|") + "|…"
+	case KindDur:
+		return fmt.Sprintf("%d-24h", k.Min/60)
+	case KindInt:
+		if k.Max > 0 {
+			return fmt.Sprintf("%d-%d", k.Min, k.Max)
+		}
+		return "number"
+	case KindURL:
+		return "url"
+	case KindMirror:
+		return "auto|url"
+	case KindNameList:
+		return "ip|url,ip|url"
+	case KindCIDRList:
+		return "cidr,cidr"
+	case KindList:
+		return "item,item"
+	case KindState:
+		return ""
+	}
+	return "value"
+}
+
+// ValueDocs 取值的含义; 通用取值(true/false/off/sub/auto)按 Kind 自动生成,
+// 只有"取值含义差异大"的键才手写 (proxy-mode/log-level/enhanced-mode/stack…)
+func (k Key) ValueDocs() []ValueDoc {
+	if len(k.Values) > 0 {
+		return k.Values
+	}
+	var out []ValueDoc
+	switch k.Kind {
+	case KindBool:
+		out = []ValueDoc{{"true", "开启"}, {"false", "关闭"}}
+	case KindTri:
+		out = []ValueDoc{{"true", "开启"}, {"false", "关闭"}, {"sub", "跟随订阅: 不注入, 用订阅/内核的值"}}
+	case KindPort:
+		out = []ValueDoc{{"off", "关闭该端口, 不监听 (输入 0/none/- 也可以)"},
+			{"sub", "跟随订阅: 订阅写了才监听"}, {"<端口号>", "监听指定端口 (1-65535)"}}
+	case KindMirror:
+		out = []ValueDoc{{"auto", "自动: 依次尝试内置镜像列表"},
+			{"<url>", "固定使用该镜像站前缀, 如 https://ghfast.top"}}
+	}
+	return out
+}
 
 // Managed 该键是否由 CLI 全权管理 (扁平键: 配置里没有就写入默认值, 永远注入内核 yaml)
 // 点号路径段 (dns/tun) 相反: 没被 set 过就完全不写, 订阅/内核原样保留
@@ -267,6 +345,9 @@ func (k Key) Parse(v string) (string, error) {
 		}
 		return canonURL(v, k)
 	case KindNameList, KindCIDRList:
+		if v == "sub" { // 段键的"跟随订阅"
+			return "sub", nil
+		}
 		return canonList(v, k)
 	case KindList:
 		items := []string{}
@@ -379,6 +460,9 @@ func (k Key) Expected() string {
 
 // CompleteValues 值位置补全 (TAB)
 func (k Key) CompleteValues() []string {
+	if k.CompFn != nil {
+		return k.CompFn()
+	}
 	if len(k.Comp) > 0 {
 		return k.Comp
 	}
@@ -387,6 +471,8 @@ func (k Key) CompleteValues() []string {
 		return []string{"true", "false"}
 	case KindTri:
 		return []string{"true", "false", "sub"}
+	case KindNameList, KindCIDRList, KindList:
+		return []string{"sub"} // 段键: sub=跟随订阅; 具体值没有通用候选
 	case KindPort:
 		return []string{"off", "sub", "1080", "7890", "7891", "7892", "8080"}
 	case KindEnum:

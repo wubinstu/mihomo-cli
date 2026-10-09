@@ -34,7 +34,7 @@ func minimalConfig(s *app.Settings) map[string]any {
 		"mode":                "direct",
 		"log-level":           "info",
 		"external-controller": "127.0.0.1:9090",
-		"secret":              s.APISecret,
+		"secret":              s.Secret,
 	}
 	injectPorts(m, s)
 	if s.AllowLan {
@@ -108,33 +108,41 @@ func Generate(s *app.Settings) error {
 		}
 	}
 
-	// cli 运行时注入层(强制)
+	// cli 运行时注入层: core 段的键全部由 CLI 权威写入 (配置里没有就写默认值);
+	// "sub" = 不注入, 跟随订阅。这里从注册表遍历, 不再逐个硬编码 ——
+	// v1.4 就因为漏了 core.ipv6-enabled, 导致设了 false 却根本不写进 yaml,
+	// 内核继续用订阅里的 true, RUNNING 列于是永远改不过来。
 	cfgMap["external-controller"] = "127.0.0.1:9090"
-	cfgMap["secret"] = s.APISecret
-	injectPorts(cfgMap, s)
-	cfgMap["allow-lan"] = s.AllowLan
-	if s.AllowLan {
-		cfgMap["bind-address"] = "*"
-	} else {
-		delete(cfgMap, "bind-address")
-	}
-	// 三态键: "sub" = 不注入(跟随订阅); 空值 = 默认值 (CLI 权威, 照样注入)
-	for _, name := range []string{"core.proxy-mode", "core.log-level", "core.tcp-concurrent", "core.unified-delay", "core.keep-alive-interval"} {
-		k := cfg.Lookup(name)
-		if k == nil {
-			continue
-		}
+	cfgMap["secret"] = s.Secret
+	for _, k := range cfg.KeysOf("core") {
 		v := k.Effective(s)
 		if v == "" || v == "sub" {
 			continue
 		}
-		if k.Kind == cfg.KindInt {
-			if n, ok := app.PortNum(v); ok && n > 0 {
-				cfgMap[cfg.YAMLPath(name)] = n
+		path := cfg.YAMLPath(k.Name)
+		switch k.Kind {
+		case cfg.KindPort:
+			if n, ok := app.PortNum(v); ok {
+				cfgMap[path] = n
+			} else {
+				delete(cfgMap, path) // off/sub: 不监听, 也不留订阅的遗留值
 			}
-			continue
+		case cfg.KindBool, cfg.KindTri: // 三态键到这里已经是 true/false ("sub" 上面跳过了)
+			cfgMap[path] = v == "true"
+		case cfg.KindInt:
+			if n, ok := app.PortNum(v); ok && n > 0 {
+				cfgMap[path] = n
+			}
+		default:
+			cfgMap[path] = v
 		}
-		cfgMap[cfg.YAMLPath(name)] = triValue(k, v)
+	}
+	delete(cfgMap, "redir-port") // 避免订阅遗留的 tproxy/redir 与 mixed-port 冲突
+	// allow-lan 的副作用: 监听所有网段
+	if s.AllowLan {
+		cfgMap["bind-address"] = "*"
+	} else {
+		delete(cfgMap, "bind-address")
 	}
 	// 用户规则优先: 置于订阅规则之前 (mihomo 首条匹配即生效)
 	if enabled := s.EnabledRules(); len(enabled) > 0 {

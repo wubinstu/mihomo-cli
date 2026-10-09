@@ -49,7 +49,7 @@ dns:
 		t.Fatal(err)
 	}
 	s := app.DefaultSettings()
-	s.APISecret = "test-secret"
+	s.Secret = "test-secret"
 	s.Profiles = []app.Profile{{Name: "t", URL: "https://x.example/sub", Nodes: 1}}
 	s.CurrentProfile = "t"
 	return s
@@ -270,3 +270,55 @@ func TestPortNumAliases(t *testing.T) {
 }
 
 var _ = strings.TrimSpace
+
+// core 段的每一个键都必须被注入, 且类型必须对 (bool 不能写成字符串)。
+// v1.4.1 连续两个 bug 都是这一类: 漏注入 (ipv6-enabled) / 类型错 (KindTri 当字符串)。
+func TestGenerateInjectsEveryCoreKey(t *testing.T) {
+	s := setup(t)
+	if err := Generate(s); err != nil {
+		t.Fatal(err)
+	}
+	m := read(t)
+	for _, k := range cfg.KeysOf("core") {
+		v := k.Effective(s)
+		path := cfg.YAMLPath(k.Name)
+		got, ok := m[path]
+		switch k.Kind {
+		case cfg.KindPort:
+			if v == "off" || v == "sub" {
+				if ok {
+					t.Errorf("%s: off/sub must not be injected", path)
+				}
+				continue
+			}
+			if n, _ := app.PortNum(v); got != n {
+				t.Errorf("%s = %#v, want %d", path, got, n)
+			}
+		case cfg.KindBool, cfg.KindTri:
+			if b, isBool := got.(bool); !isBool || b != (v == "true") {
+				t.Errorf("%s = %#v (%T), want bool %v", path, got, got, v == "true")
+			}
+		case cfg.KindInt:
+			if n, _ := app.PortNum(v); got != n {
+				t.Errorf("%s = %#v, want %d", path, got, n)
+			}
+		default:
+			if got != v {
+				t.Errorf("%s = %#v, want %q", path, got, v)
+			}
+		}
+	}
+	// ipv6 显式设 false 也必须写进去 (订阅里是 true 也不许覆盖不住)
+	s.IPV6Enabled = false
+	if err := Generate(s); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(t)["ipv6"]; got != false {
+		t.Errorf("ipv6 = %#v, want false (CLI is authoritative)", got)
+	}
+	s.IPV6Enabled = true
+	_ = Generate(s)
+	if got := read(t)["ipv6"]; got != true {
+		t.Errorf("ipv6 = %#v, want true", got)
+	}
+}

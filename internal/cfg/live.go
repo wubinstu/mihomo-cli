@@ -44,12 +44,18 @@ func Fetch(s *app.Settings) *Live {
 	if err := api.New(s).GetJSON("/configs", &m); err == nil {
 		l.cfg = m
 	}
-	l.timers["sub-auto-update-enabled"] = enabledStr(sysd.TimerEnabled("mihomo-cli-sub.timer"))
-	l.timers["sub-auto-update-interval"] = sysd.TimerInterval("mihomo-cli-sub.timer")
-	l.timers["node-auto-select-enabled"] = enabledStr(sysd.TimerEnabled("mihomo-cli-auto.timer"))
-	l.timers["node-auto-select-interval"] = sysd.TimerInterval("mihomo-cli-auto.timer")
-	l.timers["resource-auto-update-enabled"] = enabledStr(sysd.TimerEnabled("mihomo-cli-resource.timer"))
-	l.timers["resource-auto-update-interval"] = sysd.TimerInterval("mihomo-cli-resource.timer")
+	// 键名必须用注册表里的名字 (v1.4 起带段前缀), 否则查不到 → RUNNING 列全是 "-"
+	for _, k := range Keys {
+		if k.Section != "timer" {
+			continue
+		}
+		switch {
+		case strings.HasSuffix(k.Name, "-enabled"):
+			l.timers[k.Name] = enabledStr(sysd.TimerEnabled(timerUnitOf(k.Name)))
+		case strings.HasSuffix(k.Name, "-interval"):
+			l.timers[k.Name] = sysd.TimerInterval(timerUnitOf(k.Name))
+		}
+	}
 	return l
 }
 
@@ -62,6 +68,18 @@ func keyManaged(s *app.Settings, k Key) bool {
 		}
 	}
 	return SecHas(s, k.Name)
+}
+
+// timerUnitOf timer 键名 → systemd 单元名
+func timerUnitOf(key string) string {
+	switch {
+	case strings.HasPrefix(key, "timer.sub-auto-update"):
+		return sysd.SubTimerName()
+	case strings.HasPrefix(key, "timer.node-auto-select"):
+		return sysd.NodeTimerName()
+	default:
+		return sysd.ResourceTimerName()
+	}
 }
 
 func enabledStr(on bool) string {
@@ -100,12 +118,9 @@ func (l *Live) Value(k Key) string {
 	if !l.Running() {
 		return "-"
 	}
-	if !l.managed[k.Name] {
-		return "-" // 未接管: 不与运行态比较 (订阅/内核爱怎样怎样)
-	}
 	switch k.Section {
 	case "cli":
-		return "-"
+		return "-" // CLI 自身的设置没有"运行态"
 	case "timer":
 		if v, ok := l.timers[k.Name]; ok {
 			return v
@@ -180,11 +195,18 @@ func toInt(v any) (int64, bool) {
 	return 0, false
 }
 
+// Compared 该键是否参与"运行态 vs 设置值"的比对。
+// 未接管的点号路径键不参与: 订阅/内核爱用什么值用什么, 我们不置喙,
+// 否则会拿我们的默认值和内核的默认值刷出一片假差异 (v1.4 踩过)。
+func (l *Live) Compared(k Key) bool {
+	return l != nil && l.managed[k.Name]
+}
+
 // Same 运行态与 SETTING 是否一致
 func (l *Live) Same(k Key, setting string) bool {
 	run := l.Value(k)
 	if run == "-" {
-		return true // 无运行态概念, 不算差异
+		return true // 取不到运行态, 不算差异
 	}
 	return normCompare(k, run) == normCompare(k, setting)
 }
@@ -221,10 +243,10 @@ func normCompare(k Key, v string) string {
 
 // HotPatchable 该键能否用 PATCH /configs 热切换(不 reload)
 func HotPatchable(k Key) bool {
-	return k.Name == "proxy-mode" || k.Name == "log-level"
+	return k.Name == "core.proxy-mode" || k.Name == "core.log-level"
 }
 
-// Pull 从运行态读回一个键的值 (config update-file 用); err = 该键不可回写
+// Pull 从运行态读回一个键的值 (config adopt 用); err = 该键不可回写
 func (l *Live) Pull(k Key) (string, error) {
 	if !l.Running() {
 		return "", fmt.Errorf("%s", i18n.T("服务未运行"))

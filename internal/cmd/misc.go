@@ -177,11 +177,11 @@ func checkToRows(rows []checkRow) [][]string {
 // coreAssetText 已安装内核的规格 (linux/amd64 + 风味 + 版本);
 // 旧版本安装的内核没有记录规格, 就从二进制推断版本并标注"未记录"
 func coreAssetText(s *app.Settings) string {
-	platform := s.CorePlatform
+	platform := s.Platform
 	if platform == "" {
 		platform = core.PlatformName("")
 	}
-	ver := s.CoreVersion
+	ver := s.Version
 	note := ""
 	if ver == "" {
 		if v := core.VersionShort(); v != "" {
@@ -191,7 +191,7 @@ func coreAssetText(s *app.Settings) string {
 			ver = "-"
 		}
 	}
-	flavor := s.CoreFlavor
+	flavor := s.Flavor
 	if flavor == "" {
 		flavor = T("官方默认")
 	}
@@ -216,7 +216,7 @@ func configCheckRow(s *app.Settings) []checkRow {
 	}
 	var diff []string
 	for _, k := range cfg.Keys {
-		if k.Kind == cfg.KindState {
+		if k.Kind == cfg.KindState || !live.Compared(k) {
 			continue
 		}
 		if !live.Same(k, k.Effective(s)) {
@@ -226,7 +226,7 @@ func configCheckRow(s *app.Settings) []checkRow {
 	if len(diff) > 0 {
 		return []checkRow{valuesRow, {false, T("Config file"),
 			fmt.Sprintf("%d %s", len(diff), T("项与运行态不同")) +
-				" (" + T("config update-service") + ")"}}
+				" (" + T("config apply") + ")"}}
 	}
 	return []checkRow{valuesRow, {true, T("Config file"), T("与运行态完全一致")}}
 }
@@ -316,7 +316,7 @@ func lanIP() string {
 
 // ---- version ----
 
-var Version = "1.4.0"
+var Version = "1.4.1"
 
 var versionCmd = &cobra.Command{
 	Use:   "version",

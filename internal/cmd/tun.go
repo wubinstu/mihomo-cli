@@ -20,10 +20,13 @@ var tunCmd = &cobra.Command{
 	Use:   "tun",
 	Short: T("TUN 透明代理: on/off/list"),
 	Long: T("TUN 会让默认流量进入虚拟网卡, 配置错误可能把自己踢出服务器;") + "\n" +
-		T("开启前会自动做安全检查 (TUN 设备 / CAP_NET_ADMIN / SSH 对端网段排除)。") + "\n" +
-		"mihomo-cli tun on        # " + T("等价于 config set tun.enable true") + "\n" +
-		"mihomo-cli tun off       # " + T("等价于 config set tun.enable false") + "\n" +
-		"mihomo-cli tun list      # " + T("查看 tun 段全部配置项"),
+		T("开启前会自动做安全检查 (TUN 设备 / CAP_NET_ADMIN / SSH 对端网段排除)。") + "\n\n" +
+		ui.ExampleLines([][2]string{
+			{"mihomo-cli tun on", T("等价于 config set tun.enable true")},
+			{"mihomo-cli tun off", T("等价于 config set tun.enable false")},
+			{"mihomo-cli tun", T("查看 tun 段全部配置项 (等于 config get tun)")},
+			{"mihomo-cli config set tun.stack mixed", T("TUN 的其它参数都走 config set")},
+		}, 2),
 	RunE: func(cmd *cobra.Command, args []string) error { return tunList() },
 }
 
@@ -42,9 +45,16 @@ var tunOffCmd = &cobra.Command{
 var dnsCmd = &cobra.Command{
 	Use:   "dns",
 	Short: T("DNS 覆写: on/off/use/unuse/list"),
-	Long: T("自定义 DNS 会覆盖订阅中的 dns 配置; off/unuse 恢复跟随订阅。") + "\n" +
-		"mihomo-cli dns on|off|list      # " + T("等价于 config set dns.enable … / config get dns") + "\n" +
-		"mihomo-cli dns use <preset|sub#|ip...>   # " + T("设置 DNS 服务器 (等于 config set dns.nameserver …)"),
+	Long: T("自定义 DNS 会覆盖订阅中的 dns 配置; off 恢复跟随订阅。") + "\n" +
+		T("裸命令等于 config get dns, 只显示参数表 (预设表见 config set dns.nameserver -h);") + "\n" +
+		T("写操作统一走 config set, 这里只留 on/off 两个糖:") + "\n" +
+		ui.ExampleLines([][2]string{
+			{"mihomo-cli dns on", T("开启 DNS 覆写 (等于 config set dns.enable true)")},
+			{"mihomo-cli dns off", T("关闭 DNS 覆写, 恢复跟随订阅")},
+			{"mihomo-cli config set dns.nameserver cloudflare", T("设 DNS 服务器 (预设名, TAB 可补全)")},
+			{"mihomo-cli config set dns.nameserver 223.5.5.5,119.29.29.29", T("自定义 IP")},
+			{"mihomo-cli config set dns.nameserver sub", T("恢复跟随订阅")},
+		}, 2),
 	RunE: func(cmd *cobra.Command, args []string) error { return dnsList() },
 }
 
@@ -184,31 +194,9 @@ func dnsList() error {
 	s := mustSettings()
 	live := cfg.Fetch(s)
 	printConfigSections(s, live, []string{"dns"})
-	rows := [][]string{{"*", T("名称"), T("说明"), "IP"}}
-	for _, p := range dnsPresets {
-		mark := ""
-		if sameIPs(p.IPs, s.DNSServers) {
-			mark = "*"
-		}
-		rows = append(rows, []string{mark, p.Name, p.Desc, strings.Join(p.IPs, ", ")})
-	}
-	for i := range s.Profiles {
-		p := &s.Profiles[i]
-		ips := subDNS(p.Name)
-		if len(ips) == 0 {
-			continue
-		}
-		mark := ""
-		if p.Name == s.CurrentProfile && len(s.DNSServers) == 0 {
-			mark = "*"
-		}
-		if len(s.DNSServers) > 0 && sameIPs(ips, s.DNSServers) {
-			mark = "*"
-		}
-		rows = append(rows, []string{mark, fmt.Sprintf("sub%d", i+1), T("订阅") + " " + p.Name, strings.Join(ips, ", ")})
-	}
-	ui.Table(os.Stdout, rows, 2)
-	fmt.Println(T("用法: mihomo-cli dns use <预设|sub#|ip...> | mihomo-cli dns off"))
+	// 预设表只在 config set dns.nameserver -h 里给, 不在这里刷屏
+	fmt.Println(T("用法: mihomo-cli config set dns.nameserver <预设名|subN|ip...> | mihomo-cli dns off"))
+	fmt.Println(T("预设名列表: mihomo-cli config set dns.nameserver -h"))
 	return nil
 }
 
@@ -230,4 +218,5 @@ func init() {
 	tunCmd.AddCommand(tunOnCmd, tunOffCmd)
 	dnsCmd.AddCommand(dnsOnCmd, dnsOffCmd)
 	rootCmd.AddCommand(tunCmd, dnsCmd)
+
 }

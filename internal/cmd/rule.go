@@ -366,11 +366,14 @@ func addHelp(cmd *cobra.Command, args []string) {
 		}
 		ui.Table(os.Stdout, rows, 2)
 		fmt.Println(T("策略") + " (--strategy):")
+		pol := make([][2]string, 0, len(builtinPolicies)+2)
 		for _, p := range builtinPolicies {
-			fmt.Printf("  %-12s %s\n", p.Name, p.Desc)
+			pol = append(pol, [2]string{p.Name, p.Desc})
 		}
-		fmt.Printf("  %-12s %s\n", "PROXY", T("当前 group use 的分组"))
-		fmt.Printf("  %-12s %s\n", "<"+T("分组名")+">", T("模糊匹配代理分组, 如")+" '<group-name>')")
+		pol = append(pol,
+			[2]string{"PROXY", T("当前 group use 的分组")},
+			[2]string{"<" + T("分组名") + ">", T("模糊匹配代理分组, 如") + " '<group-name>'"})
+		fmt.Print(ui.Align2(pol, 2))
 	case ruleTypeDoc(typ) == nil:
 		fmt.Printf("%s %q\n", T("未知规则类型"), typ)
 	case cond == "":

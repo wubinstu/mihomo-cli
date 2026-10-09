@@ -22,9 +22,9 @@ import (
 // 它是唯一权威, render 时合成 runtime/config.yaml, 再由内核加载。
 var configCmd = &cobra.Command{
 	Use:   "config",
-	Short: T("配置管理: get/set/reset-default/unset/update-file/update-service"),
+	Short: T("配置管理: get/set/reset-default/unset/apply/adopt"),
 	Long: T("配置文件 /etc/mihomo-cli/config.toml 由 mihomo-cli 管理与运行时回写, 请勿手动编辑;") + "\n" +
-		T("手动改动后执行 config update-service 以配置文件覆盖运行中的服务;") + "\n" +
+		T("手动改动后执行 config apply 以配置文件覆盖运行中的服务, config adopt 反之;") + "\n" +
 		T("撤销某个键的接管用 config unset <key>。") + "\n\n" +
 		T("点号路径可读写内核任意配置段:") + "\n" +
 		"  mihomo-cli config set tun.enable true\n" +
@@ -105,7 +105,7 @@ func printConfigSections(s *app.Settings, live *cfg.Live, sections []string) {
 			}
 			run := live.Value(k)
 			state := "-"
-			if run != "-" && run != "" {
+			if run != "-" && run != "" && live.Compared(k) {
 				if live.Same(k, setting) {
 					state = ui.Paint("\x1b[32m", okWord(true))
 				} else {
@@ -168,6 +168,14 @@ func configSet(s *app.Settings, key, value string) error {
 		fmt.Printf("%s = %s %s\n", key, value, T("已保存"))
 		return applyConfig(s, nil)
 	}
+	// 值域扩展 (dns.nameserver 的预设名/subN) 先跑, 再走形态校验
+	if k.Resolve != nil {
+		rv, rerr := k.Resolve(s, value)
+		if rerr != nil {
+			return badValue(key, value, k.Expected(), legalValues(k))
+		}
+		value = rv
+	}
 	canon, err := k.Parse(value)
 	if err != nil {
 		return badValue(key, value, k.Expected(), legalValues(k))
@@ -229,9 +237,36 @@ func applyConfig(s *app.Settings, k *cfg.Key) error {
 			return renderAndApply(s, k)
 		}
 		fmt.Println(T("已热切换"))
-		return nil
+		return verifyApplied(s, k)
 	}
 	return renderAndApply(s, k)
+}
+
+// verifyApplied set 之后核对运行态是否真的跟上, 并明确告诉用户下一步该做什么。
+// v1.4.1 之前只打印"已热重载配置", 用户无法判断到底生效没有 (ipv6 那个 bug
+// 就是这样被藏了很久)。现在: 跟不上就说清楚是"需要重启"还是"内核不接受"。
+func verifyApplied(s *app.Settings, k *cfg.Key) error {
+	if k == nil || k.Section == "timer" || k.Section == "cli" || k.Kind == cfg.KindState {
+		return nil // 这些键没有可核对的内核运行态
+	}
+	if !sysd.IsActive() {
+		return nil // 服务没起, 没什么可核对
+	}
+	live := cfg.Fetch(s)
+	if !live.Compared(*k) {
+		return nil
+	}
+	if live.Same(*k, k.Effective(s)) {
+		return nil
+	}
+	fmt.Fprintf(os.Stderr, "\n%s: %s\n", T("注意"), T("该值已写入配置, 但内核还没用它"))
+	if k.Restart {
+		fmt.Fprintf(os.Stderr, "  %s\n", T("它需要重建监听, 请执行: mihomo-cli restart"))
+	} else {
+		fmt.Fprintf(os.Stderr, "  %s\n", T("请执行: mihomo-cli config apply "+k.Name))
+	}
+	fmt.Fprintf(os.Stderr, "  %s: mihomo-cli config get %s\n", T("核对"), k.Name)
+	return nil
 }
 
 // canonForPatch PATCH 用的值 (sub = 不下发)
@@ -269,19 +304,19 @@ func renderAndApply(s *app.Settings, k *cfg.Key) error {
 		if !serviceUpSoon() {
 			fmt.Fprintf(os.Stderr, "%s\n  %s\n  %s\n",
 				T("警告: 服务重启后未就绪, 请执行 mihomo-cli log 查看原因"),
-				T("如需恢复原值: mihomo-cli config update-service <key>"),
+				T("如需恢复原值: mihomo-cli config apply <key>"),
 				T("原配置备份在 /etc/mihomo-cli/config.toml.pre-1.3.bak"))
 			return nil
 		}
 		fmt.Println(T("已重启服务使配置生效"))
-		return nil
+		return verifyApplied(s, k)
 	}
 	if err := api.New(s).Reload(app.RuntimeConfig); err != nil {
 		fmt.Fprintf(os.Stderr, "%s: %v %s\n", T("警告: 热重载失败"), err, T("(可执行 mihomo-cli restart)"))
 		return nil
 	}
 	fmt.Println(T("已热重载配置"))
-	return nil
+	return verifyApplied(s, k)
 }
 
 // reloadAndVerify reload 后验证运行态是否真的跟上了设置值
@@ -406,13 +441,28 @@ var configUnsetCmd = &cobra.Command{
 	},
 }
 
-// ---- update-file / update-service ----
+// ---- apply / adopt (旧名 update-service / update-file, v1.5 删除) ----
 
-var configUpdateFileCmd = &cobra.Command{
-	Use:   "update-file [key...]",
+var legacyUpdateServiceCmd = &cobra.Command{
+	Use:    "update-service [key...]",
+	Short:  T("旧名, 等价于 config apply"),
+	Hidden: true,
+	RunE:   configApplyCmd.RunE,
+}
+
+var legacyUpdateFileCmd = &cobra.Command{
+	Use:    "update-file [key...]",
+	Short:  T("旧名, 等价于 config adopt"),
+	Hidden: true,
+	RunE:   configAdoptCmd.RunE,
+}
+
+var configAdoptCmd = &cobra.Command{
+	Use:   "adopt [key...]",
 	Short: T("用运行态覆盖 config.toml (可指定键, 兜底手段)"),
 	Long: T("把内核当前运行值/定时器实际状态写回 config.toml, 然后重渲染运行配置。") + "\n" +
-		T("适用于: 手动改过 runtime/config.yaml 或被别人 systemctl 改过 timer 之后, 让文件追上现实。"),
+		T("适用于: 被别人的 systemctl 改过 timer、或想让文件追上现实时。") + "\n" +
+		T("日常不需要: config set 已经会立即生效, config get 的 STATE 列就是漂移视图。"),
 	Args: cobra.ArbitraryArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		s := mustSettings()
@@ -472,11 +522,12 @@ var configUpdateFileCmd = &cobra.Command{
 	},
 }
 
-var configUpdateServiceCmd = &cobra.Command{
-	Use:   "update-service [key...]",
+var configApplyCmd = &cobra.Command{
+	Use:   "apply [key...]",
 	Short: T("用 config.toml 覆盖运行态 (可指定键, 兜底手段)"),
-	Long: T("按 config.toml 重渲染运行配置并让内核/定时器跟上; 端口等需要重启的键会自动重启服务。") + "\n" +
-		T("适用于: 手动编辑过 config.toml, 或改完没生效。"),
+	Long: T("按 config.toml 重渲染运行配置并让内核/定时器跟上; 端口等需要重建监听的键会自动重启。") + "\n" +
+		T("适用于: 手动编辑过 config.toml, 或改完没生效。") + "\n" +
+		T("日常不需要: config set 已经会立即生效。"),
 	Args: cobra.ArbitraryArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		s := mustSettings()
@@ -553,38 +604,104 @@ func orDash(s string) string {
 func configKeyHelp(name string) error {
 	k := cfg.Lookup(name)
 	if k == nil {
-		if v, ok := cfg.GetGeneric(mustSettings(), name); ok {
-			fmt.Printf("[extra] %s\n  %s: %s\n  %s: %s\n", name,
-				T("当前值"), v,
-				T("用法"), "mihomo-cli config set "+name+" <value>")
-			return nil
-		}
-		return fmt.Errorf("%s %q (%s)", T("未知配置项"), name, T("mihomo-cli config get 查看全部"))
+		return genericKeyHelp(name)
 	}
 	s := mustSettings()
-	cur := k.Get(s)
+	cur := k.Effective(s)
 	if cur == "" {
 		cur = k.Def
 	}
+
 	fmt.Printf("[%s] %s\n", cfg.SectionTitles(k.Section), k.Name)
-	fmt.Printf("  %s: %s\n", T("说明"), k.Desc())
-	fmt.Printf("  %s: %s\n", T("当前值"), cur)
-	fmt.Printf("  %s: %s\n", T("默认值"), orDash(k.Def))
-	if len(k.Enum) > 0 {
-		fmt.Printf("  %s: %s\n", T("可选值"), strings.Join(k.Enum, " | "))
-	} else {
-		fmt.Printf("  %s: %s\n", T("期望"), k.Expected())
+	rows := [][2]string{
+		{T("说明"), k.LongDesc()},
+		{T("当前值"), orDash(cur)},
+		{T("默认值"), orDash(k.Def)},
+		{T("内核键名"), cfg.YAMLPath(k.Name)},
 	}
+	// 每个取值的含义 (每个取值一行, 首列留空 -> 自动缩进到取值列)
+	if docs := k.ValueDocs(); len(docs) > 0 {
+		for i, d := range docs {
+			if i == 0 {
+				rows = append(rows, [2]string{T("取值"), d.Name + " = " + i18n.T(d.Desc)})
+				continue
+			}
+			rows = append(rows, [2]string{"", d.Name + " = " + i18n.T(d.Desc)})
+		}
+	} else if len(k.Enum) > 0 {
+		rows = append(rows, [2]string{T("可选值"), strings.Join(k.Enum, " | ")})
+	} else {
+		rows = append(rows, [2]string{T("期望"), k.Expected()})
+	}
+	// 生效方式
+	how := T("热重载配置")
 	if k.Restart {
-		fmt.Printf("  %s: %s\n", T("生效方式"), T("优先热重载, 失败才重启服务"))
+		how = T("优先热重载, 失败才重启服务")
 	} else if cfg.HotPatchable(*k) {
-		fmt.Printf("  %s: %s\n", T("生效方式"), T("热切换"))
-	} else {
-		fmt.Printf("  %s: %s\n", T("生效方式"), T("热重载配置"))
+		how = T("热切换")
 	}
-	fmt.Printf("  %s: mihomo-cli config set %s <value>\n", T("用法"), k.Name)
-	fmt.Printf("  %s: mihomo-cli config reset-default %s\n", T("恢复默认"), k.Name)
+	rows = append(rows,
+		[2]string{T("生效方式"), how},
+		[2]string{T("用法"), "mihomo-cli config set " + k.Name + " <" + k.Spec() + ">"},
+		[2]string{T("恢复默认"), "mihomo-cli config reset-default " + k.Name},
+		[2]string{T("撤销接管"), "mihomo-cli config unset " + k.Name},
+		[2]string{T("查看"), "mihomo-cli config get " + k.Name},
+	)
+	fmt.Print(ui.Align2(rows, 2))
+	// 段特有的补充表 (DNS 预设), 数据在 cmd 包, 在这里附加
+	if extra := keyExtraDoc(k.Name); extra != "" {
+		fmt.Println()
+		fmt.Print(extra)
+	}
 	return nil
+}
+
+// genericKeyHelp 未注册键 (任意 yaml 路径) 的详版帮助, 排版和注册键一致
+func genericKeyHelp(name string) error {
+	s := mustSettings()
+	cur := T("未设置")
+	if v, ok := cfg.GetGeneric(s, name); ok && v != "" {
+		cur = v
+	}
+	fmt.Printf("[extra] %s\n", name)
+	rows := [][2]string{
+		{T("说明"), T("未注册的内核配置项: 直接读写内核 config.yaml 的这个路径, 不受默认值/校验保护。")},
+		{T("当前值"), cur},
+		{T("内核键名"), name},
+	}
+	for i, d := range []struct{ name, desc string }{
+		{"true / false", T("布尔")},
+		{"123", T("整数")},
+		{"1.5", T("小数")},
+		{"a,b,c", T("列表 (逗号分隔)")},
+		{T("其它"), T("字符串")},
+	} {
+		if i == 0 {
+			rows = append(rows, [2]string{T("取值"), d.name + " = " + d.desc})
+			continue
+		}
+		rows = append(rows, [2]string{"", d.name + " = " + d.desc})
+	}
+	rows = append(rows,
+		[2]string{T("生效方式"), T("热重载配置")},
+		[2]string{T("用法"), "mihomo-cli config set " + name + " <value>"},
+		[2]string{T("撤销接管"), "mihomo-cli config unset " + name},
+		[2]string{T("查看"), "mihomo-cli config get " + name},
+	)
+	fmt.Print(ui.Align2(rows, 2))
+	return nil
+}
+
+// keyExtraDoc 某些键的附加说明表 (目前只有 DNS 预设)
+func keyExtraDoc(name string) string {
+	if name != "dns.nameserver" {
+		return ""
+	}
+	rows := make([][2]string, 0, len(dnsPresets))
+	for _, p := range dnsPresets {
+		rows = append(rows, [2]string{p.Name, p.Desc + "  " + strings.Join(p.IPs, ", ")})
+	}
+	return T("DNS 预设") + ":\n" + ui.Align2(rows, 2)
 }
 
 // ---- 补全 ----
@@ -650,40 +767,59 @@ func init() {
 		return configValueComp(cmd, args, toComplete)
 	}
 	configUnsetCmd.ValidArgsFunction = configKeyComp
-	for _, c := range []*cobra.Command{configUpdateFileCmd, configUpdateServiceCmd} {
+	for _, c := range []*cobra.Command{configAdoptCmd, configApplyCmd, legacyUpdateFileCmd, legacyUpdateServiceCmd} {
 		c.ValidArgsFunction = configKeyComp
+	}
+	// 旧名 (v1.4.1 之前): 隐藏, 但还能用, 帮助里指向新名
+	for old, new := range map[*cobra.Command]*cobra.Command{
+		legacyUpdateFileCmd: configAdoptCmd, legacyUpdateServiceCmd: configApplyCmd,
+	} {
+		old.Hidden = true
+		old.Short = T("旧名, 等价于") + " " + new.Name()
 	}
 	// set 的长帮助由注册表生成: 新增键只需改表格, 帮助/补全/校验自动跟着变
 	configSetCmd.Long = buildSetHelp()
-	for _, c := range []*cobra.Command{configSetCmd, configResetCmd, configUpdateFileCmd, configUpdateServiceCmd} {
+	for _, c := range []*cobra.Command{configSetCmd, configResetCmd, configApplyCmd, configAdoptCmd, legacyUpdateFileCmd, legacyUpdateServiceCmd} {
 		markMutating(c)
 	}
-	configCmd.AddCommand(configGetCmd, configSetCmd, configResetCmd, configUnsetCmd, configUpdateFileCmd, configUpdateServiceCmd)
+	configCmd.AddCommand(configGetCmd, configSetCmd, configResetCmd, configUnsetCmd, configApplyCmd, configAdoptCmd,
+		legacyUpdateFileCmd, legacyUpdateServiceCmd)
 	rootCmd.AddCommand(configCmd)
 }
 
-// buildSetHelp 从注册表生成 config set 的分组帮助 (单一事实来源)
+// buildSetHelp 从注册表生成 config set 的分组帮助 (单一事实来源)。
+// 简版: 一行一个键 = 键名 <紧凑取值> + 一句话说明 + [默认 x]; 取值列超长截断,
+// 完整取值与每个值的含义只看详版 (config set <key> -h)。
 func buildSetHelp() string {
 	var b strings.Builder
 	b.WriteString(T("修改配置并立即生效; 非法值拒绝写入。裸命令执行显示本帮助, <key> -h 显示单键详情。") + "\n")
+	b.WriteString(T("键名统一为 <段>.<键>: core=内核顶层键 / cli=CLI 自身 / timer=systemd / dns,tun=内核同名段。") + "\n")
 	for _, sec := range []string{"core", "cli", "timer", "dns", "tun"} {
 		keys := cfg.KeysOf(sec)
 		if len(keys) == 0 {
 			continue
 		}
 		fmt.Fprintf(&b, "\n-- %s --\n", cfg.SectionTitles(sec))
+		rows := make([][2]string, 0, len(keys))
 		for _, k := range keys {
-			vals := legalValues(&k)
-			if k.Kind == cfg.KindEnum {
-				vals = strings.Join(k.Enum, "|")
+			head := k.Name
+			if spec := k.Spec(); spec != "" {
+				head += " <" + spec + ">"
 			}
-			fmt.Fprintf(&b, "%-32s %s%s\n", k.Name+" <"+vals+">", k.Desc(), defSuffix(k))
+			desc := k.Desc()
+			if k.Def != "" {
+				desc += "  [" + T("默认") + " " + k.Def + "]"
+			}
+			rows = append(rows, [2]string{head, desc})
 		}
+		b.WriteString(ui.Align2(rows, 2))
 	}
 	b.WriteString("\n" + T("未注册的内核配置项(任意 yaml 路径)也可写, 值按字面推断类型:") + "\n")
-	b.WriteString("  mihomo-cli config set sniffer.enable true\n")
-	b.WriteString("  mihomo-cli config set geodata-mode false\n")
-	b.WriteString("  mihomo-cli config set hosts 'a.com = 1.2.3.4'\n")
+	b.WriteString(ui.ExampleLines([][2]string{
+		{"mihomo-cli config set sniffer.enable true", T("开启域名嗅探")},
+		{"mihomo-cli config set geodata-mode false", T("用 metadb 而不是 dat")},
+		{"mihomo-cli config set dns.fake-ip-range 28.0.0.1/8", T("改 Fake-IP 段")},
+	}, 2))
 	return b.String()
 }
 

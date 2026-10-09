@@ -23,7 +23,31 @@ var TestURLPresets = []string{
 	"http://connectivitycheck.platform.hicloud.com/generate_204",
 }
 
-// GithubMirrorPresets GitHub 镜像站预设 (config set github-mirror 的补全)
+// dnsPresetNames DNS 预设名 (config set dns.nameserver 的补全)。
+// 预设表本身在 internal/cmd (要输出中文说明), 这里只放名字, 由 cmd 包注册进来,
+// 避免 cfg → cmd 的依赖倒置。
+var dnsPresetNames = func() []string { return nil }
+
+// SetDNSPresetNames 由 cmd 包注入预设名与解析函数
+func SetDNSPresetNames(names []string, resolve func(s *app.Settings, v string) ([]string, error)) {
+	dnsPresetNames = func() []string { return names }
+	dnsResolve = resolve
+}
+
+var dnsResolve func(s *app.Settings, v string) ([]string, error)
+
+// resolveDNSValue 把 dns.nameserver 的值扩展成逗号分隔的真实值:
+// 预设名 (cloudflare) / subN (订阅自带 DNS) → IP 或 URL 列表; 其它原样返回。
+func resolveDNSValue(s *app.Settings, v string) (string, error) {
+	if dnsResolve != nil {
+		if out, err := dnsResolve(s, v); err == nil && len(out) > 0 {
+			return strings.Join(out, ","), nil
+		}
+	}
+	return v, nil
+}
+
+// GithubMirrorPresets GitHub 镜像站预设 (config set cli.github-mirror 的补全)
 var GithubMirrorPresets = []string{
 	"https://ghfast.top",
 	"https://gh-proxy.com",
@@ -37,25 +61,41 @@ var LangPresets = []string{"auto", "zh", "en"}
 var Keys = []Key{
 	// ---- core config: 注入内核 config.yaml (sub=不注入, 跟随订阅) ----
 	{Name: "core.allow-lan", Section: "core", Kind: KindBool, Def: "false",
-		Usage: "允许局域网设备使用代理 (监听 0.0.0.0)",
-		Get:   func(s *app.Settings) string { return boolStr(s.AllowLan) },
-		Set:   func(s *app.Settings, v string) error { s.AllowLan = v == "true"; return nil }},
+		Usage:   "允许局域网设备使用代理 (监听 0.0.0.0)",
+		Detail:  "关时只监听 127.0.0.1 (只有本机能用); 开时监听 0.0.0.0, 局域网设备可用。\n注意: 开放后同网段任何人都能通过这台机器上网, 请在受信任网络里使用。",
+		Example: "config set core.allow-lan true",
+		Get:     func(s *app.Settings) string { return boolStr(s.AllowLan) },
+		Set:     func(s *app.Settings, v string) error { s.AllowLan = v == "true"; return nil }},
 	{Name: "core.mixed-port", Section: "core", Kind: KindPort, Def: "7890", Restart: true,
-		Usage: "混合代理端口 (http + socks5); off=关闭",
-		Get:   func(s *app.Settings) string { return portStr(s.MixedPort) },
-		Set:   func(s *app.Settings, v string) error { s.MixedPort = v; return nil }},
+		Usage:   "混合代理端口 (http + socks5); off=关闭",
+		Detail:  "一个端口同时提供 HTTP 和 SOCKS5 代理, 推荐只开这一个。\n改成 off 后本机与局域网都无法通过端口用代理 (TUN 模式除外)。",
+		Example: "config set core.mixed-port 7890",
+		Get:     func(s *app.Settings) string { return portStr(s.MixedPort) },
+		Set:     func(s *app.Settings, v string) error { s.MixedPort = v; return nil }},
 	{Name: "core.socks-port", Section: "core", Kind: KindPort, Def: "off", Restart: true,
-		Usage: "独立 SOCKS5 端口; off=关闭 (mixed-port 已含 socks5)",
-		Get:   func(s *app.Settings) string { return portStr(s.SocksPort) },
-		Set:   func(s *app.Settings, v string) error { s.SocksPort = v; return nil }},
+		Usage:   "独立 SOCKS5 端口; off=关闭 (mixed-port 已含 socks5)",
+		Detail:  "只有当某个客户端必须用独立 SOCKS5 端口时才需要开; mixed-port 已经能同时提供 socks5。\n三个端口 (mixed/socks/http) 不能填成同一个号。",
+		Example: "config set core.socks-port 7891",
+		Get:     func(s *app.Settings) string { return portStr(s.SocksPort) },
+		Set:     func(s *app.Settings, v string) error { s.SocksPort = v; return nil }},
 	{Name: "core.http-port", Section: "core", Kind: KindPort, Def: "off", Restart: true,
-		Usage: "独立 HTTP(S) 代理端口; off=关闭 (mixed-port 已含 http)",
-		Get:   func(s *app.Settings) string { return portStr(s.HTTPPort) },
-		Set:   func(s *app.Settings, v string) error { s.HTTPPort = v; return nil }},
+		Usage:   "独立 HTTP(S) 代理端口; off=关闭 (mixed-port 已含 http)",
+		Detail:  "只有当某个客户端必须用独立 HTTP 端口时才需要开; mixed-port 已经能同时提供 http。\n三个端口 (mixed/socks/http) 不能填成同一个号。",
+		Example: "config set core.http-port 7892",
+		Get:     func(s *app.Settings) string { return portStr(s.HTTPPort) },
+		Set:     func(s *app.Settings, v string) error { s.HTTPPort = v; return nil }},
 	{Name: "core.proxy-mode", Section: "core", Kind: KindEnum, Def: "rule",
-		Enum:  []string{"rule", "global", "direct", "sub"},
-		Usage: "代理模式; sub=跟随订阅 (热切换)",
-		Get:   func(s *app.Settings) string { return orDef(s.ProxyMode, "rule") },
+		Enum:   []string{"rule", "global", "direct", "sub"},
+		Usage:  "代理模式; sub=跟随订阅 (热切换)",
+		Detail: "决定流量如何被分流。rule 是日常推荐; global/direct 用于临时全量代理或全量直连。",
+		Values: []ValueDoc{
+			{"rule", "按规则分流: 国内直连/国外代理 (推荐)"},
+			{"global", "所有流量都走代理 (调试用; 正常上网会很慢)"},
+			{"direct", "所有流量都直连, 不代理 (相当于临时关掉代理)"},
+			{"sub", "跟随订阅: 用订阅里的 mode, CLI 不注入"},
+		},
+		Example: "config set core.proxy-mode global",
+		Get:     func(s *app.Settings) string { return orDef(s.ProxyMode, "rule") },
 		Set: func(s *app.Settings, v string) error {
 			if v == "sub" {
 				s.ProxyMode = "sub"
@@ -65,47 +105,74 @@ var Keys = []Key{
 			return nil
 		}},
 	{Name: "core.ipv6-enabled", Section: "core", Kind: KindBool, Def: "false",
-		Usage: "启用 IPv6 转发",
-		Get:   func(s *app.Settings) string { return boolStr(s.IPV6Enabled) },
-		Set:   func(s *app.Settings, v string) error { s.IPV6Enabled = v == "true"; return nil }},
+		Usage:   "启用 IPv6 转发",
+		Detail:  "开时内核会处理 AAAA 记录并通过代理访问 IPv6 目标。\n服务器没有 IPv6 出口时建议关闭, 否则可能反而连不上。",
+		Example: "config set core.ipv6-enabled false",
+		Get:     func(s *app.Settings) string { return boolStr(s.IPV6Enabled) },
+		Set:     func(s *app.Settings, v string) error { s.IPV6Enabled = v == "true"; return nil }},
 	{Name: "core.log-level", Section: "core", Kind: KindEnum, Def: "info",
-		Enum:  []string{"debug", "info", "warning", "error", "silent", "sub"},
-		Usage: "内核日志等级; sub=跟随订阅 (热切换)",
-		Get:   func(s *app.Settings) string { return orDef(s.LogLevel, "info") },
-		Set:   func(s *app.Settings, v string) error { s.LogLevel = v; return nil }},
+		Enum:   []string{"debug", "info", "warning", "error", "silent", "sub"},
+		Usage:  "内核日志等级; sub=跟随订阅 (热切换)",
+		Detail: "内核写进 journal 的日志量。排查节点/规则问题时用 debug, 日常用 info。",
+		Values: []ValueDoc{
+			{"debug", "最详细: 每条连接匹配了哪条规则都记 (日志量很大)"},
+			{"info", "常规信息 (推荐)"},
+			{"warning", "只记警告"},
+			{"error", "只记错误"},
+			{"silent", "完全静音"},
+			{"sub", "跟随订阅: 用订阅里的 log-level"},
+		},
+		Example: "config set core.log-level debug",
+		Get:     func(s *app.Settings) string { return orDef(s.LogLevel, "info") },
+		Set:     func(s *app.Settings, v string) error { s.LogLevel = v; return nil }},
 	{Name: "core.tcp-concurrent", Section: "core", Kind: KindTri, Def: "true",
-		Usage: "TCP 并发连接 (多路复用, 提速); sub=跟随订阅",
-		Get:   func(s *app.Settings) string { return orDef(s.TCPConcurrent, "true") },
-		Set:   func(s *app.Settings, v string) error { s.TCPConcurrent = v; return nil }},
+		Usage:   "TCP 并发连接 (多路复用, 提速); sub=跟随订阅",
+		Detail:  "开时同一目的地的多个请求会复用同一条 TCP 连接, 明显降低握手开销。\n极少数对连接复用敏感的服务可能异常, 那时关掉试试。",
+		Example: "config set core.tcp-concurrent true",
+		Get:     func(s *app.Settings) string { return orDef(s.TCPConcurrent, "true") },
+		Set:     func(s *app.Settings, v string) error { s.TCPConcurrent = v; return nil }},
 	{Name: "core.unified-delay", Section: "core", Kind: KindTri, Def: "true",
-		Usage: "统一延迟计算 (URL-Test 更精准); sub=跟随订阅",
-		Get:   func(s *app.Settings) string { return orDef(s.UnifiedDelay, "true") },
-		Set:   func(s *app.Settings, v string) error { s.UnifiedDelay = v; return nil }},
+		Usage:   "统一延迟计算 (URL-Test 更精准); sub=跟随订阅",
+		Detail:  "开时延迟测试会把「建连+首字节」合并计算, URL-Test 择优更准。\n只影响测速显示和自动择优, 不影响实际转发。",
+		Example: "config set core.unified-delay false",
+		Get:     func(s *app.Settings) string { return orDef(s.UnifiedDelay, "true") },
+		Set:     func(s *app.Settings, v string) error { s.UnifiedDelay = v; return nil }},
 	{Name: "core.keep-alive-interval", Section: "core", Kind: KindInt, Def: "30", Min: 1, Max: 600,
-		Comp:  []string{"sub", "15", "30", "60", "120", "300"},
-		Usage: "长连接保活间隔 (秒); sub=跟随订阅",
-		Get:   func(s *app.Settings) string { return orDef(s.KeepAliveInterval, "30") },
-		Set:   func(s *app.Settings, v string) error { s.KeepAliveInterval = v; return nil }},
+		Comp:    []string{"sub", "15", "30", "60", "120", "300"},
+		Usage:   "长连接保活间隔 (秒); sub=跟随订阅",
+		Detail:  "空闲连接多久发一次保活包。太小浪费流量, 太大可能被中间设备掐断。\n30 秒是常见选择; 移动网络下可改 15。",
+		Example: "config set core.keep-alive-interval 15",
+		Get:     func(s *app.Settings) string { return orDef(s.KeepAliveInterval, "30") },
+		Set:     func(s *app.Settings, v string) error { s.KeepAliveInterval = v; return nil }},
 
 	// ---- cli: 只影响 mihomo-cli 自身 ----
 	{Name: "cli.language", Section: "cli", Kind: KindEnum, Def: "auto", Enum: LangPresets,
-		Usage: "输出语言; auto=按系统 locale",
+		Usage:  "输出语言; auto=按系统 locale",
+		Detail: "影响所有命令的提示/帮助/表格表头。节点名和订阅内容始终原样显示。",
+		Values: []ValueDoc{
+			{"auto", "按系统 locale 判断, 中文环境用中文, 其它用英文"},
+			{"zh", "中文"},
+			{"en", "English"},
+		},
+		Example: "config set cli.language en",
 		Get: func(s *app.Settings) string {
-			if s.CLILanguage == "" {
+			if s.Language == "" {
 				return "auto"
 			}
-			return s.CLILanguage
+			return s.Language
 		},
 		Set: func(s *app.Settings, v string) error {
 			if v == "auto" {
-				s.CLILanguage = ""
+				s.Language = ""
 			} else {
-				s.CLILanguage = v
+				s.Language = v
 			}
 			return nil
 		}},
 	{Name: "cli.github-mirror", Section: "cli", Kind: KindMirror, Def: "auto", Enum: append([]string{"auto"}, GithubMirrorPresets...),
-		Usage: "GitHub 镜像站前缀 (下载内核/资源失败时依次尝试); auto=内置列表",
+		Usage:   "GitHub 镜像站前缀 (下载内核/资源失败时依次尝试); auto=内置列表",
+		Detail:  "下载内核/geo 资源/CLI 自更新时, GitHub 直连失败会自动改走镜像站。\nauto = 依次尝试内置的 3 个镜像; 填了具体地址就固定用它。",
+		Example: "config set cli.github-mirror https://ghfast.top",
 		Get: func(s *app.Settings) string {
 			if s.GithubMirror == "" {
 				return "auto"
@@ -121,9 +188,11 @@ var Keys = []Key{
 			return nil
 		}},
 	{Name: "cli.test-url", Section: "cli", Kind: KindURL, Def: TestURLPresets[0], Enum: TestURLPresets,
-		Usage: "测速/连通性检测 URL (204 端点)",
-		Get:   func(s *app.Settings) string { return s.TestURL },
-		Set:   func(s *app.Settings, v string) error { s.TestURL = v; return nil }},
+		Usage:   "测速/连通性检测 URL (204 端点)",
+		Detail:  "节点测速 (node test / node auto) 和 doctor 都请求这个 URL, 用返回 204 的时间当延迟。\n换一个离服务器近、且被代理允许的端点, 测速结果会更真实。",
+		Example: "config set cli.test-url http://cp.cloudflare.com/generate_204",
+		Get:     func(s *app.Settings) string { return s.TestURL },
+		Set:     func(s *app.Settings, v string) error { s.TestURL = v; return nil }},
 	{Name: "cli.test-timeout", Section: "cli", Kind: KindInt, Def: "5000", Min: 100, Max: 60000,
 		Comp:  []string{"1000", "3000", "5000", "10000"},
 		Usage: "测速超时 (毫秒)",
@@ -187,7 +256,17 @@ var Keys = []Key{
 	// ---- dns 段 (点号路径; 只用过一次才写进内核 yaml) ----
 	dnsKey("dns.enable", KindBool, "false", "启用 DNS 覆写 (覆盖订阅的 dns 配置)"),
 	dnsKey("dns.ipv6", KindBool, "false", "DNS 解析 IPv6 结果 (AAAA)"),
-	dnsKey("dns.enhanced-mode", KindEnum, "fake-ip", "DNS 增强模式"),
+	func() Key {
+		k := dnsKey("dns.enhanced-mode", KindEnum, "fake-ip", "DNS 增强模式")
+		k.Detail = "决定 DNS 对代理域名返回什么地址。fake-ip 兼容性最好; redir-host 返回真实 IP, 便于排查。"
+		k.Values = []ValueDoc{
+			{"fake-ip", "返回虚拟 IP (推荐: 兼容最好, 支持按域名分流)"},
+			{"redir-host", "返回真实 IP (便于抓包排查, 部分客户端会绕过分流)"},
+			{"normal", "只转发不返回映射 (兼容性最差)"},
+		}
+		k.Example = "config set dns.enhanced-mode redir-host"
+		return k
+	}(),
 	dnsKey("dns.fake-ip", KindBool, "true", "启用 Fake-IP (enhanced-mode=fake-ip 时生效)"),
 	dnsKey("dns.fake-ip-range", KindText, "28.0.0.1/8", "Fake-IP 地址段"),
 	dnsKey("dns.use-system-hosts", KindBool, "true", "使用 /etc/hosts"),
@@ -198,7 +277,17 @@ var Keys = []Key{
 
 	// ---- tun 段 (点号路径; 开启需要 CAP_NET_ADMIN, 见 cmd 的 TUN 安全护栏) ----
 	tunKey("tun.enable", KindBool, "false", "启用 TUN 透明代理 (需要 CAP_NET_ADMIN; 默认关闭)", true),
-	tunKey("tun.stack", KindEnum, "mixed", "TUN 网络栈", true),
+	func() Key {
+		k := tunKey("tun.stack", KindEnum, "mixed", "TUN 网络栈", true)
+		k.Detail = "TUN 网卡用哪种协议栈转发。system 性能最好但依赖内核特性; gvisor 兼容性最好。"
+		k.Values = []ValueDoc{
+			{"system", "内核协议栈 (性能最好, 需要较新内核)"},
+			{"gvisor", "用户态协议栈 (兼容性最好, 性能一般)"},
+			{"mixed", "两者混合 (默认)"},
+		}
+		k.Example = "config set tun.stack gvisor"
+		return k
+	}(),
 	tunKey("tun.device", KindText, "mihomo", "TUN 网卡名", true),
 	tunKey("tun.mtu", KindInt, "9000", "TUN MTU", true),
 	tunKey("tun.dns-hijack", KindList, "any:53,tcp://any:53", "DNS 劫持规则", true),
@@ -266,23 +355,36 @@ func dnsKey(name string, kind Kind, def, usage string) Key {
 			}
 			return strings.Join(s.DNSServers, ",")
 		}
+		base.Resolve = resolveDNSValue // 预设名 / subN → 逗号分隔的真实值
 		base.Set = func(s *app.Settings, v string) error {
 			if v == "sub" {
 				s.DNSServers = nil
 				return nil
 			}
-			items := []string{}
+			var items []string
 			for _, it := range strings.Split(v, ",") {
 				if it = strings.TrimSpace(it); it != "" {
 					items = append(items, it)
 				}
 			}
 			if len(items) == 0 {
-				return fmt.Errorf("%s: %s", v, "ip|url,ip|url")
+				return fmt.Errorf("%s: ip|url,ip|url", v)
 			}
 			s.DNSServers = items
 			return nil
 		}
+		// 值域: 预设名 / subN / IP / DoH-DoT URL / sub
+		base.CompFn = func() []string { return dnsPresetNames() } // 间接一层, 让 cmd 包后注入的预设名生效
+		base.Detail = "DNS 服务器列表。可以填预设名 (TAB 可补全)、订阅编号 subN、裸 IP 或 DoH/DoT URL;\n" +
+			"sub = 跟随订阅, 不注入。"
+		base.Values = []ValueDoc{
+			{"<预设名>", "ali / 114 / google / cloudflare / adguard / quad9 / dnspod"},
+			{"subN", "用第 N 个订阅自带的 dns.nameserver"},
+			{"<ip>", "一个或多个 IP, 逗号分隔"},
+			{"<url>", "DoH/DoT 地址, 如 https://dns.alidns.com/dns-query"},
+			{"sub", "跟随订阅, CLI 不注入"},
+		}
+		base.Example = "config set dns.nameserver cloudflare"
 	}
 	return base
 }

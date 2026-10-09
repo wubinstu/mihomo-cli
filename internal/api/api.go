@@ -21,8 +21,8 @@ type Client struct {
 
 func New(s *app.Settings) *Client {
 	return &Client{
-		base:   s.APIBase,
-		secret: s.APISecret,
+		base:   s.Base,
+		secret: s.Secret,
 		hc:     &http.Client{Timeout: 30 * time.Second},
 	}
 }

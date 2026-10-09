@@ -389,24 +389,24 @@ func pushHistory(s *app.Settings, newVersion, flavor, arch string) error {
 		_ = os.Chmod(dst, 0o755)
 	}
 	// 入栈 (栈顶=最近一个)
-	s.CoreHistory = append([]app.CoreVer{{
+	s.History = append([]app.CoreVer{{
 		Version: cur, Flavor: flavorOf(s), Platform: PlatformName(arch), InstalledAt: time.Now(),
-	}}, s.CoreHistory...)
-	if len(s.CoreHistory) > MaxHistory {
-		dropped := s.CoreHistory[MaxHistory:]
-		s.CoreHistory = s.CoreHistory[:MaxHistory]
+	}}, s.History...)
+	if len(s.History) > MaxHistory {
+		dropped := s.History[MaxHistory:]
+		s.History = s.History[:MaxHistory]
 		for _, d := range dropped {
 			_ = os.RemoveAll(filepath.Join(app.VersionsDir, d.Version))
 		}
 	}
-	s.CoreVersion = newVersion
-	s.CoreFlavor = flavor
-	s.CorePlatform = PlatformName(arch)
+	s.Version = newVersion
+	s.Flavor = flavor
+	s.Platform = PlatformName(arch)
 	return s.Save()
 }
 
 // flavorOf 已记录的当前风味 (新版本换风味时不能污染旧记录)
-func flavorOf(s *app.Settings) string { return s.CoreFlavor }
+func flavorOf(s *app.Settings) string { return s.Flavor }
 
 // Rollback 出栈: 把上一个装过的版本装回 (纯本地, 不需要网络)
 func Rollback() (string, error) {
@@ -414,7 +414,7 @@ func Rollback() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if len(s.CoreHistory) == 0 {
+	if len(s.History) == 0 {
 		// v1.2 遗留的 bin/mihomo.old
 		if _, err := os.Stat(app.CoreBinOld); err == nil {
 			_ = os.Remove(app.CoreBin)
@@ -425,11 +425,11 @@ func Rollback() (string, error) {
 		}
 		return "", fmt.Errorf("%s", i18n.T("没有可回滚的旧版本 (版本栈为空)"))
 	}
-	top := s.CoreHistory[0]
+	top := s.History[0]
 	src := filepath.Join(app.VersionsDir, top.Version, "mihomo")
 	if _, err := os.Stat(src); err != nil {
 		// 存档丢失: 弹出这一项看下一个
-		s.CoreHistory = s.CoreHistory[1:]
+		s.History = s.History[1:]
 		_ = s.Save()
 		return Rollback()
 	}
@@ -448,9 +448,9 @@ func Rollback() (string, error) {
 		return "", err
 	}
 	_ = os.Chmod(app.CoreBin, 0o755)
-	s.CoreHistory = s.CoreHistory[1:]
-	s.CoreVersion = top.Version
-	s.CoreFlavor = top.Flavor
+	s.History = s.History[1:]
+	s.Version = top.Version
+	s.Flavor = top.Flavor
 	_ = s.Save()
 	return top.Version, nil
 }
@@ -461,25 +461,25 @@ func History() []app.CoreVer {
 	if err != nil {
 		return nil
 	}
-	return s.CoreHistory
+	return s.History
 }
 
 // Upgrade 通用"切换版本": 接受任意版本号 (可新可旧), 只要与当前不同就换。
 // spec 为空 = 沿用已记住的平台+风味 + 最新版本。
 func Upgrade(s *app.Settings, flavor, version, proxy, mirror string) (*InstallResult, error) {
 	arch := ""
-	if s.CorePlatform != "" {
-		arch = strings.TrimPrefix(s.CorePlatform, "linux/")
+	if s.Platform != "" {
+		arch = strings.TrimPrefix(s.Platform, "linux/")
 	}
 	if flavor == "" {
-		flavor = s.CoreFlavor // 沿用已记住的风味
+		flavor = s.Flavor // 沿用已记住的风味
 	}
 	cur := VersionShort()
 	res, err := InstallSpec(s, flavor, version, proxy, mirror, arch)
 	if err != nil {
 		return nil, err
 	}
-	if cur != "" && cur == res.Version && s.CoreFlavor == res.Flavor {
+	if cur != "" && cur == res.Version && s.Flavor == res.Flavor {
 		fmt.Printf("%s %s\n", i18n.T("内核已是该版本"), res.Version)
 	}
 	return res, nil

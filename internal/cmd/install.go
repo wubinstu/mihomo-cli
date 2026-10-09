@@ -14,6 +14,7 @@ import (
 	"github.com/wubinstu/mihomo-cli/internal/core"
 	"github.com/wubinstu/mihomo-cli/internal/render"
 	"github.com/wubinstu/mihomo-cli/internal/sysd"
+	"github.com/wubinstu/mihomo-cli/internal/ui"
 )
 
 // reloadIfActive 服务运行中则热重载配置, 否则提示
@@ -77,12 +78,15 @@ var installCmd = &cobra.Command{
 	Short: T("安装: --core / --resource / --systemd / --completion (可组合; 无参数显示帮助)"),
 	Long: T("安装动作幂等: 文件不存在则下载创建, 存在则更新刷新。订阅请用 sub add, 参数请用 config set。") + `
 
-mihomo-cli install --core auto --resource all --systemd --completion bash   # ` + T("全新安装") + `
-mihomo-cli install --core compatible:v1.19.19   # ` + T("指定风味与版本") + `
-mihomo-cli install --resource mmdb              # ` + T("安装/更新单个资源 (mmdb/asn/geoip/geosite/all)") + `
-mihomo-cli install --systemd                    # ` + T("按 config.toml 重新生成全部 systemd 单元并 daemon-reload") + `
-mihomo-cli install --completion bash            # ` + T("安装/更新 shell 补全 (bash/zsh/fish)") + `
-mihomo-cli install [--proxy URL] [--mirror URL] # ` + T("一次性下载代理/镜像 (默认失败时自动尝试内置镜像)") + `
+` + ui.ExampleLines([][2]string{
+		{"mihomo-cli install --core auto --resource all --systemd --completion bash", T("全新安装")},
+		{"mihomo-cli install --core compatible:v1.19.19", T("指定风味与版本")},
+		{"mihomo-cli install --core v1.19.31", T("指定版本, 风味自动探测")},
+		{"mihomo-cli install --resource mmdb", T("安装/更新单个资源 (mmdb/asn/geoip/geosite/all)")},
+		{"mihomo-cli install --systemd", T("按 config.toml 重新生成全部 systemd 单元并 daemon-reload")},
+		{"mihomo-cli install --completion bash", T("安装/更新 shell 补全 (bash/zsh/fish)")},
+		{"mihomo-cli install [--proxy URL] [--mirror URL]", T("一次性下载代理/镜像 (默认失败时自动尝试内置镜像)")},
+	}, 2) + `
 
 ` + T("--core 的规格是「风味:版本」两个正交轴, 平台(系统/架构)自动探测:") + `
   auto                       ` + T("自动探测风味, 装最新版") + `
@@ -220,11 +224,13 @@ var uninstallCmd = &cobra.Command{
 	Short: T("卸载: --core / --resource / --systemd / --completion / --purge (无参数显示帮助)"),
 	Long: T("卸载与 install 严格对称, 只删你指定的那一部分; --purge 才是彻底卸干净。") + `
 
-mihomo-cli uninstall --core                    # ` + T("只卸载内核 (先停止服务), 配置与订阅保留") + `
-mihomo-cli uninstall --resource                # ` + T("只删除 4 个 geo 资源文件") + `
-mihomo-cli uninstall --systemd                 # ` + T("只关闭并删除全部 systemd service/timer") + `
-mihomo-cli uninstall --completion bash         # ` + T("只删除指定 shell 补全 (不带值=三个全删)") + `
-mihomo-cli uninstall --purge                   # ` + T("彻底卸载: 以上全部 + /etc/mihomo-cli + mihomo-cli 二进制自身") + `
+` + ui.ExampleLines([][2]string{
+		{"mihomo-cli uninstall --core", T("只卸载内核 (先停止服务), 配置与订阅保留")},
+		{"mihomo-cli uninstall --resource", T("只删除 4 个 geo 资源文件")},
+		{"mihomo-cli uninstall --systemd", T("只关闭并删除全部 systemd service/timer")},
+		{"mihomo-cli uninstall --completion bash", T("只删除指定 shell 补全 (不带值=三个全删)")},
+		{"mihomo-cli uninstall --purge", T("彻底卸载: 以上全部 + /etc/mihomo-cli + mihomo-cli 二进制自身")},
+	}, 2) + `
 
 ` + T("相当于整套软件从未在这台机器上出现过。") + "\n" +
 		T("不再使用的配置目录内容可先看 mihomo-cli config get。"),
@@ -287,8 +293,8 @@ mihomo-cli uninstall --purge                   # ` + T("彻底卸载: 以上全�
 					removed++
 				}
 			}
-			s.CoreHistory = nil
-			s.CoreVersion = ""
+			s.History = nil
+			s.Version = ""
 			_ = s.Save()
 			fmt.Printf("%s %d (%s)\n", T("内核已删除"), removed, app.BinDir)
 			fmt.Println(T("服务已停止") + "; " + T("重新安装") + ": mihomo-cli install --core auto")

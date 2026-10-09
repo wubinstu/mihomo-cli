@@ -61,9 +61,8 @@ if ! try_download; then
 fi
 tar xzf "$TMP/mihomo-cli.tar.gz" -C "$TMP"
 
-SUDO=""
-[ "$(id -u)" != 0 ] && SUDO="sudo"
-$SUDO install -m 0755 "$TMP/mihomo-cli" /usr/bin/mihomo-cli
+# 上文已经要求了 root 权限
+install -m 0755 "$TMP/mihomo-cli" /usr/bin/mihomo-cli
 
 echo ">> 完成: $(mihomo-cli version)"
-echo ">> 下一步: mihomo-cli install [--proxy ...] && mihomo-cli init && mihomo-cli start"
+echo ">> 下一步: mihomo-cli install [--proxy ...] && mihomo-cli sub add <name> <URL>"

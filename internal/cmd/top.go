@@ -22,10 +22,12 @@ var topInterval = 1
 var topCmd = &cobra.Command{
 	Use:   "top [watch] [sec]",
 	Short: T("流量与连接总览 (top watch 持续刷新, top kill <编号> 关连接)"),
-	Long: T("流量与连接总览") + `:
-  mihomo-cli top              # ` + T("单次输出: 总流量/速度/连接数/连接列表") + `
-  mihomo-cli top watch [N]    # ` + T("每 N 秒刷新 (默认 1s), Ctrl-C 退出") + `
-  mihomo-cli top kill <id..>  # ` + T("关闭指定编号的连接"),
+	Long: T("流量与连接总览") + ":\n" +
+		ui.ExampleLines([][2]string{
+			{"mihomo-cli top", T("单次输出: 总流量/速度/连接数/连接列表")},
+			{"mihomo-cli top watch [N]", T("每 N 秒刷新 (默认 1s), Ctrl-C 退出")},
+			{"mihomo-cli top kill <id..>", T("关闭指定编号的连接")},
+		}, 2),
 	Args: cobra.MaximumNArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		s := mustSettings()

@@ -30,12 +30,9 @@ var dnsPresets = []struct {
 }
 
 // presetNames 预设名列表 (帮助信息用)
-func presetNames() string {
-	var names []string
-	for _, p := range dnsPresets {
-		names = append(names, p.Name)
-	}
-	return strings.Join(names, "/")
+// presetNamesText 预设名的文字形式 (帮助信息用)
+func presetNamesText() string {
+	return strings.Join(dnsPresetNameList(), " / ")
 }
 
 // subDNS 从订阅文件提取 dns.nameserver
@@ -59,10 +56,10 @@ func sameIPs(a, b []string) bool {
 	return strings.Join(a, ",") == strings.Join(b, ",")
 }
 
-// resolveDNSServers 解析 dns use 的参数: 预设名 | sub# | 裸 IP
+// resolveDNSServers 解析 DNS 值: 预设名 | subN | 裸 IP (dns.nameserver 的值域)
 func resolveDNSServers(s *app.Settings, args []string) ([]string, error) {
 	var servers []string
-	if len(args) == 1 {
+	if len(args) == 1 { // 单个参数: 预设名 / subN
 		for _, p := range dnsPresets {
 			if p.Name == args[0] {
 				return p.IPs, nil
@@ -93,69 +90,24 @@ func resolveDNSServers(s *app.Settings, args []string) ([]string, error) {
 	return servers, nil
 }
 
-var dnsUseCmd = &cobra.Command{
-	Use:   "use <preset|sub#|ip...>",
-	Short: T("设置 DNS 服务器 (预设名/订阅编号/1-3 个 IP)"),
-	Long: T("等于 config set dns.nameserver <值>; unuse 恢复跟随订阅。") + "\n" +
-		"mihomo-cli dns use <preset>   # " + T("预设") + ": " + presetNames() + "\n" +
-		"mihomo-cli dns use sub#       # " + T("使用某订阅自带的 DNS") + "\n" +
-		"mihomo-cli dns use <ip...>    # " + T("自定义 DNS 服务器 IP"),
-	Args: cobra.MinimumNArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		s := mustSettings()
-		servers, err := resolveDNSServers(s, args)
-		if err != nil {
-			return err
-		}
-		k := cfg.Lookup("dns.nameserver")
-		if k == nil {
-			return fmt.Errorf("%s", T("内部错误: dns.nameserver 未注册"))
-		}
-		canon, err := k.Parse(strings.Join(servers, ","))
-		if err != nil {
-			return err
-		}
-		if err := k.Set(s, canon); err != nil {
-			return err
-		}
-		if err := s.Save(); err != nil {
-			return err
-		}
-		fmt.Printf("dns.nameserver = %s %s\n", canon, T("已保存"))
-		return applyConfig(s, k)
-	},
-}
-
-var dnsUnuseCmd = &cobra.Command{
-	Use:   "unuse",
-	Short: T("取消自定义 DNS (恢复跟随订阅)"),
-	RunE:  func(cmd *cobra.Command, args []string) error { return dnsSet(false) },
-}
-
+// dnsCmd 的裸命令 = config get dns (只打参数表; 预设表移到 config set dns.nameserver -h)
+// 写操作全部走 config set; 这里只保留 on/off 两个最常用的糖。
 func init() {
-	dnsUseCmd.ValidArgsFunction = func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-		if len(args) > 0 {
-			return nil, noFileComp()
-		}
-		s := mustSettingsQuiet()
-		var out []string
-		for _, p := range dnsPresets {
-			if strings.HasPrefix(p.Name, toComplete) {
-				out = append(out, p.Name)
-			}
-		}
-		if s != nil {
-			for i := range s.Profiles {
-				n := fmt.Sprintf("sub%d", i+1)
-				if strings.HasPrefix(n, toComplete) {
-					out = append(out, n)
-				}
-			}
-		}
-		return out, noFileComp()
-	}
-	for _, c := range []*cobra.Command{dnsUseCmd, dnsUnuseCmd, dnsOnCmd, dnsOffCmd} {
+	for _, c := range []*cobra.Command{dnsOnCmd, dnsOffCmd} {
 		markMutating(c)
 	}
-	dnsCmd.AddCommand(dnsUseCmd, dnsUnuseCmd)
+	// 预设名 / subN 的解析与补全交给 cfg (dns.nameserver 的值域),
+	// 这样 config set dns.nameserver cloudflare 也能用, 且只有一处实现
+	cfg.SetDNSPresetNames(dnsPresetNameList(), func(s *app.Settings, v string) ([]string, error) {
+		return resolveDNSServers(s, []string{v})
+	})
+}
+
+// dnsPresetNameList 预设名列表 (补全用)
+func dnsPresetNameList() []string {
+	out := make([]string, 0, len(dnsPresets))
+	for _, p := range dnsPresets {
+		out = append(out, p.Name)
+	}
+	return out
 }
