@@ -109,8 +109,6 @@ var en = map[string]string{
 	// ---- cobra 帮助骨架 / 段标题 (键带冒号, 避免和 "示例"→example 这类短键撞车) ----
 	"core config":    "core config",
 	"cli":            "cli",
-	"dns":            "dns",
-	"tun":            "tun",
 	"systemd timers": "systemd timers",
 	"用法:":            "Usage:",
 	"别名:":            "Aliases:",
@@ -181,6 +179,8 @@ var en = map[string]string{
 	"定时更新全部订阅 (作用域: 所有订阅)":        "update every subscription on a schedule (scope: all subscriptions)",
 	"定时对当前订阅的当前分组自动择优 (作用域: 仅当前)": "auto-select the best node of the current group (scope: current subscription/group only)",
 	"定时更新 geo 资源文件 (作用域: 全局)":     "update geo resource files on a schedule (scope: global)",
+	"未开启": "off",
+
 	// ---- root / help ----
 	"mihomo 内核的纯 CLI 管理外壳 (Linux 服务器代理工具)": "Pure-CLI manager for the mihomo proxy core (Linux server proxy tool)",
 	"面向 Linux 服务器的 Clash/mihomo 代理管理工具":    "Clash/mihomo proxy manager for Linux servers",
@@ -794,15 +794,12 @@ var en = map[string]string{
 	"配置管理: get/set/reset-default/unset/apply/adopt":          "Config management: get/set/reset-default/unset/apply/adopt",
 	"手动改动后执行 config apply 以配置文件覆盖运行中的服务, config adopt 反之;":   "after a manual edit run config apply to let the file win, or config adopt to let the running state win",
 	"如需恢复原值: mihomo-cli config apply <key>":                  "to restore: mihomo-cli config apply <key>",
-	"旧名, 等价于 config apply":                                   "legacy name, same as config apply",
-	"旧名, 等价于 config adopt":                                   "legacy name, same as config adopt",
 	"适用于: 被别人的 systemctl 改过 timer、或想让文件追上现实时。":               "Use when a timer was changed by someone else's systemctl, or to bring the file back in line with reality.",
 	"日常不需要: config set 已经会立即生效, config get 的 STATE 列就是漂移视图。": "Not needed day to day: config set applies immediately and config get's STATE column is the drift view.",
 	"按 config.toml 重渲染运行配置并让内核/定时器跟上; 端口等需要重建监听的键会自动重启。":     "Re-renders the runtime config from config.toml and makes the core/timers follow; keys that need new listeners restart the service.",
 
 	// ---- v1.4.1 leftovers ----
 	"日常不需要: config set 已经会立即生效。": "Not needed day to day: config set applies immediately.",
-	"旧名, 等价于":      "legacy name, same as",
 	"config apply": "config apply",
 
 	// ---- v1.4.1 leftovers ----

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"os/user"
 	"syscall"
 
 	"github.com/spf13/cobra"
@@ -71,17 +70,6 @@ func isTTY() bool {
 		return false
 	}
 	return fi.Mode()&os.ModeCharDevice != 0
-}
-
-// currentUser 当前用户名 (日志/提示用)
-func currentUser() string {
-	if u, err := user.Current(); err == nil {
-		return u.Username
-	}
-	if n := os.Getenv("USER"); n != "" {
-		return n
-	}
-	return "unknown"
 }
 
 func Execute() {

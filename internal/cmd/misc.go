@@ -97,7 +97,7 @@ var doctorCmd = &cobra.Command{
 					r = x
 				}
 			}
-			path, ok, mt, size := core.ResourceInfo(r.Name)
+			_, ok, mt, size := core.ResourceInfo(r.Name)
 			text := ""
 			if ok {
 				text = fmt.Sprintf("%s  %s  %s", r.File, humanBytes(size), mt.Format("2006-01-02 15:04"))
@@ -105,7 +105,6 @@ var doctorCmd = &cobra.Command{
 				text = fmt.Sprintf("%s (%s)", T("缺失"), r.File)
 			}
 			rows = append(rows, checkRow{ok, T("Resource") + " " + r.Name, text})
-			_ = path
 		}
 
 		active := sysd.IsActive()
@@ -347,6 +346,8 @@ var versionCmd = &cobra.Command{
 	},
 }
 
+// humanBytes 字节数转可读。**二进制单位** (KiB/MiB), 和内核 /traffic 的口径一致;
+// 订阅用量那边用 subs.BytesHuman (十进制 KB/MB, 对齐机场后台), 两者不能混用。
 func humanBytes(n int64) string {
 	f := float64(n)
 	for _, u := range []string{"B", "KiB", "MiB", "GiB", "TiB"} {

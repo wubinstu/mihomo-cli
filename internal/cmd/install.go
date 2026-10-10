@@ -156,7 +156,6 @@ var installCmd = &cobra.Command{
 		// --systemd: 按 config.toml 重新生成全部单元
 		if installSystemd {
 			fmt.Println(T("注册 systemd 服务") + " ...")
-			sysd.DropLegacyUnits() // v1.3 及更早的单元名 (mihomo-cli.service / mihomo-cli-auto.*)
 			if err := sysd.InstallService(tunOn(s)); err != nil {
 				return err
 			}

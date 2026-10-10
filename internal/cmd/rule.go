@@ -354,7 +354,6 @@ func addHelp(cmd *cobra.Command, args []string) {
 	typ, _ := cmd.Flags().GetString("type")
 	cond, _ := cmd.Flags().GetString("condition")
 	strat, _ := cmd.Flags().GetString("strategy")
-	noRes, _ := cmd.Flags().GetBool("no-resolve")
 
 	fmt.Println("mihomo-cli rule add --type <type> --condition <cond> --strategy <strategy> [--no-resolve]")
 	switch {
@@ -396,7 +395,6 @@ func addHelp(cmd *cobra.Command, args []string) {
 		td := ruleTypeDoc(typ)
 		fmt.Printf("\n%s: %s %s %s: %s\n", T("预览"), i18n.T(td.Desc), condText(td, cond), T("的流量"), strategyDesc(resolved))
 		fmt.Println(T("语法将由内核校验, 非法规则会被拒绝并回滚"))
-		_ = noRes
 	}
 }
 

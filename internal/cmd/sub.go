@@ -33,7 +33,7 @@ func subListRun(cmd *cobra.Command, args []string) error {
 		rows = append(rows, []string{
 			cur, strconv.Itoa(i + 1), p.Name, strconv.Itoa(p.Nodes),
 			humanTime(p.UpdatedAt),
-			ui.QuotaText(p.UserInfo), shorten(p.URL, 40),
+			quotaCell(p.UserInfo), shorten(p.URL, 40),
 		})
 	}
 	ui.Table(os.Stdout, rows, 2)
@@ -177,10 +177,8 @@ var subUnuseCmd = &cobra.Command{
 		}
 		if sysd.IsActive() {
 			reloadIfActive(s)
-			fmt.Println(T("已悬空: 内核以空配置运行, 全部流量 DIRECT (服务保持运行)"))
-		} else {
-			fmt.Println(T("已悬空: 内核以空配置运行, 全部流量 DIRECT (服务保持运行)"))
 		}
+		fmt.Println(T("已悬空: 内核以空配置运行, 全部流量 DIRECT (服务保持运行)"))
 		if len(s.Profiles) > 0 {
 			fmt.Println(T("提示: 可 mihomo-cli sub use <id|名称> 重新启用"))
 		}

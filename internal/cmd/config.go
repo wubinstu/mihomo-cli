@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"sort"
 	"strings"
 	"time"
 
@@ -47,8 +46,11 @@ var configGetCmd = &cobra.Command{
 				fmt.Println(k.Get(s))
 				return nil
 			}
-			// 段
+			// 段 (dns/tun 是 core.dns/core.tun 的简称)
 			if isSection(arg) {
+				if arg == "dns" || arg == "tun" {
+					arg = "core." + arg
+				}
 				printConfigSections(s, live, []string{arg})
 				return nil
 			}
@@ -59,12 +61,11 @@ var configGetCmd = &cobra.Command{
 			}
 			return fmt.Errorf("%s %q (mihomo-cli config get --help)", T("未知配置项"), arg)
 		}
-		sections := []string{"core", "cli", "timer"}
-		for _, sec := range cfg.ShownSections(s) {
-			if !contains(sections, sec) {
-				sections = append(sections, sec)
-			}
-		}
+		// 顺序: 内核相关 (core / core.dns / core.tun) 在前, CLI 自身 (cli / timer) 在后。
+		// 没启用的段不露面 (只看总开关)。
+		sections := []string{"core"}
+		sections = append(sections, cfg.ShownSections(s)...)
+		sections = append(sections, "cli", "timer")
 		printConfigSections(s, live, sections)
 		// 设了值但总开关没开的段: 不摆出来, 但要告诉用户"你设过, 只是没启用",
 		// 否则用户会以为没保存 (显式 config get <段> 永远能看)
@@ -76,16 +77,12 @@ var configGetCmd = &cobra.Command{
 	},
 }
 
-func contains(list []string, s string) bool {
-	for _, v := range list {
-		if v == s {
-			return true
-		}
-	}
-	return false
-}
-
+// isSection 是否是已注册的段名; dns/tun 作为 core.dns/core.tun 的简称也认
+// (和 `mihomo-cli dns` / `mihomo-cli tun` 两个糖命令保持一致)
 func isSection(name string) bool {
+	if name == "dns" || name == "tun" {
+		name = "core." + name
+	}
 	for _, k := range cfg.Keys {
 		if k.Section == name {
 			return true
@@ -466,21 +463,7 @@ var configUnsetCmd = &cobra.Command{
 	},
 }
 
-// ---- apply / adopt (旧名 update-service / update-file, v1.5 删除) ----
-
-var legacyUpdateServiceCmd = &cobra.Command{
-	Use:    "update-service [key...]",
-	Short:  T("旧名, 等价于 config apply"),
-	Hidden: true,
-	RunE:   configApplyCmd.RunE,
-}
-
-var legacyUpdateFileCmd = &cobra.Command{
-	Use:    "update-file [key...]",
-	Short:  T("旧名, 等价于 config adopt"),
-	Hidden: true,
-	RunE:   configAdoptCmd.RunE,
-}
+// ---- apply / adopt ----
 
 var configAdoptCmd = &cobra.Command{
 	Use:   "adopt [key...]",
@@ -527,7 +510,7 @@ var configAdoptCmd = &cobra.Command{
 				fmt.Fprintf(os.Stderr, "%s: %v\n", k.Name, err)
 				continue
 			}
-			fmt.Printf("%s: %s → %s\n", k.Name, orDash(old), v)
+			fmt.Printf("%s: %s → %s\n", k.Name, cfg.OrDash(old), v)
 			changed++
 		}
 		if changed == 0 {
@@ -617,13 +600,6 @@ func resolveKeys(args []string) ([]cfg.Key, error) {
 	return out, nil
 }
 
-func orDash(s string) string {
-	if s == "" {
-		return "-"
-	}
-	return s
-}
-
 // ---- 单键详情 (config set <key> -h) ----
 
 func configKeyHelp(name string) error {
@@ -640,8 +616,8 @@ func configKeyHelp(name string) error {
 	fmt.Printf("[%s] %s\n", cfg.SectionTitles(k.Section), k.Name)
 	rows := [][2]string{
 		{T("说明"), k.LongDesc()},
-		{T("当前值"), orDash(cur)},
-		{T("默认值"), orDash(k.Def)},
+		{T("当前值"), cfg.OrDash(cur)},
+		{T("默认值"), cfg.OrDash(k.Def)},
 		{T("内核键名"), cfg.YAMLPath(k.Name)},
 	}
 	// 每个取值的含义 (每个取值一行, 首列留空 -> 自动缩进到取值列)
@@ -768,11 +744,6 @@ func okWord(ok bool) string {
 }
 
 // sortedKeys 键名排序 (补全/文档用)
-func sortedKeys() []string {
-	out := cfg.Names()
-	sort.Strings(out)
-	return out
-}
 
 func init() {
 	configSetCmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {
@@ -792,23 +763,16 @@ func init() {
 		return configValueComp(cmd, args, toComplete)
 	}
 	configUnsetCmd.ValidArgsFunction = configKeyComp
-	for _, c := range []*cobra.Command{configAdoptCmd, configApplyCmd, legacyUpdateFileCmd, legacyUpdateServiceCmd} {
+	for _, c := range []*cobra.Command{configAdoptCmd, configApplyCmd} {
 		c.ValidArgsFunction = configKeyComp
-	}
-	// 旧名 (v1.4.1 之前): 隐藏, 但还能用, 帮助里指向新名
-	for old, new := range map[*cobra.Command]*cobra.Command{
-		legacyUpdateFileCmd: configAdoptCmd, legacyUpdateServiceCmd: configApplyCmd,
-	} {
-		old.Hidden = true
-		old.Short = T("旧名, 等价于") + " " + new.Name()
 	}
 	// set 的长帮助由注册表生成: 新增键只需改表格, 帮助/补全/校验自动跟着变
 	configSetCmd.Long = buildSetHelp()
-	for _, c := range []*cobra.Command{configSetCmd, configResetCmd, configApplyCmd, configAdoptCmd, legacyUpdateFileCmd, legacyUpdateServiceCmd} {
+	for _, c := range []*cobra.Command{configSetCmd, configResetCmd, configApplyCmd, configAdoptCmd} {
 		markMutating(c)
 	}
-	configCmd.AddCommand(configGetCmd, configSetCmd, configResetCmd, configUnsetCmd, configApplyCmd, configAdoptCmd,
-		legacyUpdateFileCmd, legacyUpdateServiceCmd)
+	configCmd.AddCommand(configGetCmd, configSetCmd, configResetCmd, configUnsetCmd,
+		configApplyCmd, configAdoptCmd)
 	rootCmd.AddCommand(configCmd)
 }
 

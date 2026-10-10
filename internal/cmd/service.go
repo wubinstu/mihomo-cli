@@ -57,6 +57,7 @@ var statusCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		s := mustSettings()
 		active := sysd.IsActive()
+		live := cfg.Fetch(s)
 		var rows []checkRow
 
 		state := T("未运行")
@@ -89,8 +90,13 @@ var statusCmd = &cobra.Command{
 		if k := cfgLookup("core.dns.enable"); k != nil && k.Get(s) == "true" {
 			rows = append(rows, checkRow{true, T("DNS override"), T("已开启")})
 		}
-		if k := cfgLookup("core.tun.enable"); k != nil && k.Get(s) == "true" {
-			rows = append(rows, checkRow{true, T("TUN"), T("已开启")})
+		// TUN 简略状态: 内核侧的开关 + 网卡名/协议栈 (v1.5.1 用户要求)
+		if on, device, stack, ok := live.TunInfo(); ok {
+			txt := T("未开启")
+			if on {
+				txt = fmt.Sprintf("%s (%s / %s)", T("已开启"), cfg.OrDash(device), cfg.OrDash(stack))
+			}
+			rows = append(rows, checkRow{true, T("TUN"), txt})
 		}
 
 		if active {
@@ -157,13 +163,6 @@ func subLast(s *app.Settings) time.Time {
 		return p.UpdatedAt
 	}
 	return time.Time{}
-}
-
-func onOff2(b bool) string {
-	if b {
-		return T("已启用")
-	}
-	return T("已停用")
 }
 
 func init() {

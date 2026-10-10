@@ -25,13 +25,6 @@ const (
 	resourceUnitName  = "mihomo-cli-resource.service"
 )
 
-// legacyUnits v1.3 及更早的单元名: install 时自动 disable+remove, 保证改名不留下孤儿
-var legacyUnits = []string{
-	"mihomo-cli.service",
-	"mihomo-cli-auto.service",
-	"mihomo-cli-auto.timer",
-}
-
 // cliPath timer 里 ExecStart 用的固定路径: install/uninstall 都是 root-only 且就装在这里,
 // 绝不能用 os.Executable() —— 用户从 /tmp 跑一次二进制就会把 /tmp/mihomo-cli 写进 timer。
 const cliPath = "/usr/bin/mihomo-cli"
@@ -238,12 +231,11 @@ func systemdDur(d time.Duration) string {
 // InstallTimersQuiet 同 InstallTimers, 失败仅返回错误 (不打印)
 func InstallTimersQuiet(s *app.Settings) error { return InstallTimers(s) }
 
-// RemoveAll 卸载全部单元文件 (新旧名字都清)
+// RemoveAll 卸载全部单元文件 (服务 + 三个 timer 的 service/timer)
 func RemoveAll() {
 	_, _ = runRoot("systemctl", "disable", "--now", serviceName, subTimerName, nodeTimerName, resourceTimerName)
-	_, _ = runRoot("systemctl", append([]string{"disable", "--now"}, legacyUnits...)...)
-	for _, u := range append([]string{serviceName, subUnitName, subTimerName,
-		nodeUnitName, nodeTimerName, resourceUnitName, resourceTimerName}, legacyUnits...) {
+	for _, u := range []string{serviceName, subUnitName, subTimerName,
+		nodeUnitName, nodeTimerName, resourceUnitName, resourceTimerName} {
 		removeUnit(u)
 	}
 	_ = daemonReload()
@@ -256,24 +248,6 @@ func ServiceName() string { return serviceName }
 func SubTimerName() string      { return subTimerName }
 func NodeTimerName() string     { return nodeTimerName }
 func ResourceTimerName() string { return resourceTimerName }
-
-// DropLegacyUnits 清理 v1.3 及更早的单元名 (install 时调用, 幂等)
-func DropLegacyUnits() {
-	var found []string
-	for _, u := range legacyUnits {
-		if _, err := os.Stat(filepath.Join(unitDir, u)); err == nil {
-			found = append(found, u)
-		}
-	}
-	if len(found) == 0 {
-		return
-	}
-	_, _ = runRoot("systemctl", append([]string{"disable", "--now"}, found...)...)
-	for _, u := range found {
-		removeUnit(u)
-	}
-	_ = daemonReload()
-}
 
 // CLIPath timer 里 ExecStart 的路径: 固定 /usr/bin/mihomo-cli,
 // 该文件不存在(开发/沙箱)时才回退到当前可执行文件并告警。
@@ -297,8 +271,7 @@ func Service(action string) error {
 
 // IsActive 服务是否正在运行
 func IsActive() bool {
-	out, err := runRoot("systemctl", "is-active", "--quiet", serviceName)
-	_ = out
+	_, err := runRoot("systemctl", "is-active", "--quiet", serviceName)
 	return err == nil
 }
 

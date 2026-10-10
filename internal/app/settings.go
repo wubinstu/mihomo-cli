@@ -11,8 +11,6 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
-
-	"gopkg.in/yaml.v3"
 )
 
 // Profile 一个订阅配置
@@ -191,29 +189,25 @@ func (s *Settings) ProxyPort() int {
 	return 7890
 }
 
-// ConfigLanguage 只从 config.toml 里取语言设置 (i18n 在包初始化时就要用, 不能等 LoadSettings)。
-// 新旧两种磁盘格式都认: v1.4.1+ 是 [cli] language, 更早是扁平键 cli_language。
+// ConfigLanguage 只从 config.toml 的 [cli] language 取语言设置。
+// i18n 在包初始化时就要用, 不能等 LoadSettings (命令的 Short/Long 那会儿已经 T() 完了)。
 func ConfigLanguage() string {
 	data, err := os.ReadFile(SettingsFile)
 	if err != nil {
 		return ""
 	}
 	var v struct {
-		Language string `toml:"cli_language"` // <=v1.4.0 扁平键
-		CLI      struct {
+		CLI struct {
 			Language string `toml:"language"`
-		} `toml:"cli"` // v1.4.1+ 表
+		} `toml:"cli"`
 	}
 	if err := toml.Unmarshal(data, &v); err != nil {
 		return ""
 	}
-	if l := strings.ToLower(strings.TrimSpace(v.CLI.Language)); l != "" {
-		return l
-	}
-	return strings.ToLower(strings.TrimSpace(v.Language))
+	return strings.ToLower(strings.TrimSpace(v.CLI.Language))
 }
 
-// LoadSettings 读取配置; 文件不存在时返回默认值
+// LoadSettings 读取配置; 文件不存在时返回默认值。
 // 认不出来的键一律**报错**而不是静默忽略 —— 历史上两次弄丢用户配置都是"静默解码"造成的。
 func LoadSettings() (*Settings, error) {
 	s := DefaultSettings()
@@ -230,20 +224,8 @@ func LoadSettings() (*Settings, error) {
 		return nil, fmt.Errorf("%s: %w", "config.toml 解析失败", err)
 	}
 	// BurntSushi 会把 map[string]any 字段(overrides)里的嵌套键也报成 undecoded,
-	// 虽然它们其实解码成功了 —— 这里要过滤掉, 只留真正认不出的键。
+	// 虽然它们其实解码成功了 —— 过滤掉, 只留真正认不出的键。
 	if undecoded := realUndecoded(md.Undecoded()); len(undecoded) > 0 {
-		// 有认不出来的键: 要么是 <=v1.4.0 的扁平旧格式, 要么是手改错了。
-		// 先试迁移; 迁移不了就明确报错, 绝不静默丢数据。
-		if migrated, ok := tryMigrateLegacy(data); ok {
-			backupLegacyConfig()
-			*s = *migrated
-			s.fixup()
-			// 顺手把文件重排成新格式 (一次性; 备份已在上面做好)
-			if err := s.Save(); err == nil {
-				DropLegacyOverrides()
-			}
-			return s, nil
-		}
 		var keys []string
 		for _, k := range undecoded {
 			keys = append(keys, strings.Join(k, "."))
@@ -252,11 +234,6 @@ func LoadSettings() (*Settings, error) {
 		return nil, fmt.Errorf("%s: %s", "config.toml 含有无法识别的键", strings.Join(keys, ", "))
 	}
 	s.fixup()
-	// v1.2 之前的 overrides.yaml 收编进 config.toml [overrides]
-	if err := s.MigrateLegacy(); err == nil && len(s.Overrides) > 0 {
-		_ = s.Save()
-		DropLegacyOverrides()
-	}
 	return s, nil
 }
 
@@ -272,228 +249,16 @@ func realUndecoded(keys []toml.Key) []toml.Key {
 	return out
 }
 
-// tryMigrateLegacy 试着把旧格式规范成新结构; 成功且没有认不出的键才返回 ok
-func tryMigrateLegacy(data []byte) (*Settings, bool) {
-	norm, err := legacyNormalize(data)
-	if err != nil {
-		return nil, false
-	}
-	fresh := DefaultSettings()
-	md, err := toml.Decode(string(norm), fresh)
-	if err != nil || len(realUndecoded(md.Undecoded())) > 0 {
-		return nil, false
-	}
-	return fresh, true
-}
-
-// legacyNormalize 把 <=v1.4.0 的扁平 config.toml 规范成 v1.4.1 的表结构。
-// 只做键名/类型的搬运, 不改语义。
-func legacyNormalize(data []byte) ([]byte, error) {
-	var raw map[string]any
-	if err := toml.Unmarshal(data, &raw); err != nil {
-		return nil, err
-	}
-	// 旧键名 → (新表, 新键名)
-	move := map[string][2]string{
-		"cli_language":    {"cli", "language"},
-		"current_profile": {"cli", "current_profile"},
-		"current_group":   {"cli", "current_group"},
-		"github_mirror":   {"cli", "github_mirror"},
-		"core_platform":   {"core-spec", "platform"},
-		"core_flavor":     {"core-spec", "flavor"},
-		"core_version":    {"core-spec", "version"},
-		"allow_lan":       {"core", "allow_lan"},
-		"ipv6_enabled":    {"core", "ipv6_enabled"},
-		"log_level":       {"core", "log_level"},
-
-		"api_base":                      {"control-api", "base"},
-		"api_secret":                    {"control-api", "secret"},
-		"sub_auto_update_enabled":       {"timer", "sub_auto_update_enabled"},
-		"sub_auto_update_interval":      {"timer", "sub_auto_update_interval"},
-		"node_auto_select_enabled":      {"timer", "node_auto_select_enabled"},
-		"node_auto_select_interval":     {"timer", "node_auto_select_interval"},
-		"auto_select_last_run":          {"timer", "node_auto_select_last_run"},
-		"resource_auto_update_enabled":  {"timer", "resource_auto_update_enabled"},
-		"resource_auto_update_interval": {"timer", "resource_auto_update_interval"},
-		"resource_last_run":             {"timer", "resource_auto_update_last_run"},
-		"test_url":                      {"misc", "test_url"},
-		"test_timeout_ms":               {"misc", "test_timeout_ms"},
-	}
-	out := map[string]any{}
-	for k, v := range raw {
-		if m, ok := move[k]; ok {
-			sec, nk := m[0], m[1]
-			tbl, _ := out[sec].(map[string]any)
-			if tbl == nil {
-				tbl = map[string]any{}
-				out[sec] = tbl
-			}
-			tbl[nk] = legacyValue(k, v)
-			continue
-		}
-		switch k {
-		case "mixed_port", "socks_port", "http_port":
-			// 端口: int → string (0=off)
-			tbl, _ := out["core"].(map[string]any)
-			if tbl == nil {
-				tbl = map[string]any{}
-				out["core"] = tbl
-			}
-			tbl[k] = legacyPort(v)
-		case "dns_servers":
-			// ≤v1.4.2 它躺在 [core] 里, 但语义上是 dns 段的 nameserver, 挪进 [overrides.dns]
-			ov, _ := out["overrides"].(map[string]any)
-			if ov == nil {
-				ov = map[string]any{}
-				out["overrides"] = ov
-			}
-			dns, _ := ov["dns"].(map[string]any)
-			if dns == nil {
-				dns = map[string]any{}
-				ov["dns"] = dns
-			}
-			dns["nameserver"] = legacyStrList(v)
-		case "proxy_mode":
-			tbl, _ := out["core"].(map[string]any)
-			if tbl == nil {
-				tbl = map[string]any{}
-				out["core"] = tbl
-			}
-			tbl[k] = v
-		case "tcp_concurrent", "unified_delay":
-			tbl, _ := out["core"].(map[string]any)
-			if tbl == nil {
-				tbl = map[string]any{}
-				out["core"] = tbl
-			}
-			tbl[k] = legacyTri(v)
-		case "keep_alive_interval":
-			tbl, _ := out["core"].(map[string]any)
-			if tbl == nil {
-				tbl = map[string]any{}
-				out["core"] = tbl
-			}
-			tbl[k] = legacyNum(v)
-		case "user_rules", "profiles", "overrides":
-			out[k] = v // 数组表/段原样保留
-		case "core_history":
-			// 旧版是顶层 [[core_history]], 新版是 [core-spec] 下的表
-			spec, _ := out["core-spec"].(map[string]any)
-			if spec == nil {
-				spec = map[string]any{}
-				out["core-spec"] = spec
-			}
-			spec["history"] = v
-		default:
-			// 认不出的键原样保留: 这样二次解码仍然会报 undecoded,
-			// tryMigrateLegacy 就会失败 → 上层明确报错, 不会静默丢数据
-			out[k] = v
-		}
-	}
-	renameV15(out)
-	return toml.Marshal(out)
-}
-
-// legacyPort int 端口 → "7891" / "off"
-// legacyStrList 旧格式里的字符串列表 (interface{} → []any)
-func legacyStrList(v any) []any {
-	if l, ok := v.([]any); ok {
-		return l
-	}
-	return nil
-}
-
-func legacyPort(v any) string {
-	if n, ok := v.(int64); ok {
-		if n > 0 {
-			return strconv.FormatInt(n, 10)
-		}
-		return "off"
-	}
-	if s, ok := v.(string); ok {
-		return s
-	}
-	return "off"
-}
-
-// legacyTri bool → "true"/"false"
-func legacyTri(v any) string {
-	if b, ok := v.(bool); ok {
-		if b {
-			return "true"
-		}
-		return "false"
-	}
-	if s, ok := v.(string); ok {
-		return s
-	}
-	return "sub"
-}
-
-// legacyNum int64 → 十进制字符串
-func legacyNum(v any) string {
-	if n, ok := v.(int64); ok {
-		return strconv.FormatInt(n, 10)
-	}
-	if s, ok := v.(string); ok {
-		return s
-	}
-	return ""
-}
-
-func legacyValue(key string, v any) any { return v }
-
-// MigrateLegacy 把 v1.2 之前的 overrides.yaml 收编进 config.toml [overrides];
-// 成功写回后删除旧文件。只做一次。
-func (s *Settings) MigrateLegacy() error {
-	if len(s.Overrides) > 0 {
-		return nil
-	}
-	data, err := os.ReadFile(OverridesFile)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return err
-	}
-	var m map[string]any
-	if err := yaml.Unmarshal(data, &m); err != nil || len(m) == 0 {
-		return nil // 空文件或不可解析: 不迁移, 保持原样
-	}
-	s.Overrides = m
-	return nil
-}
-
-// DropLegacyOverrides 删除已被收编的 overrides.yaml (写回成功后调用)
-func DropLegacyOverrides() {
-	if _, err := os.Stat(OverridesFile); err == nil {
-		_ = os.Rename(OverridesFile, OverridesFile+".migrated")
-	}
-}
-
 func randSecret() string {
 	b := make([]byte, 16)
 	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)
 }
 
-// backupLegacyConfig 把旧格式 config.toml 备份为 config.toml.pre-1.5.bak
-// (只做一次: 目标已存在就跳过)。格式迁移是会改变文件内容的动作, 必须留后路。
-func backupLegacyConfig() {
-	// 备份名带版本号: 每一轮迁移各自留档, 不会把上一轮的备份覆盖掉
-	bak := SettingsFile + ".pre-" + Version + ".bak"
-	if _, err := os.Stat(bak); err == nil {
-		return
-	}
-	data, err := os.ReadFile(SettingsFile)
-	if err != nil {
-		return
-	}
-	_ = os.WriteFile(bak, data, 0o640)
-}
-
-// Save 写回配置: 按段写成 TOML 表, 段落名和 CLI 的 <段>.<键> 一一对应
-// ([cli] ↔ cli.*, [core] ↔ core.*, [timer] ↔ timer.*, [overrides.dns] ↔ dns.*)
+// Save 写回配置: 按段写成 TOML 表。
+// 段落和 CLI 的键名前缀一一对应: [cli]↔cli.*, [core]↔core.* (顶层键),
+// [overrides.<段>]↔core.<段>.* (内核的配置段), [timer]↔timer.*。
+// 托管键一律写有效值, 保证文件和 `config get` 的 SETTING 列逐个对得上。
 func (s *Settings) Save() error {
 	if err := EnsureDirs(); err != nil {
 		return err
@@ -506,7 +271,7 @@ func (s *Settings) Save() error {
 	w("#    查看: mihomo-cli config get\n")
 	w("#    修改: mihomo-cli config set <key> <value>\n")
 	w("#    漂移: mihomo-cli config apply | adopt\n")
-	w("#    段落名和命令的 <段>.<键> 对应: [core]↔core.* [cli]↔cli.* [timer]↔timer.*\n")
+	w("#    core.<路径> 就是内核 config.yaml 的路径; 内核的配置段在 [overrides.<段名>]\n")
 	w("# ============================================================\n")
 
 	w("\n[cli]\n")
@@ -530,8 +295,6 @@ func (s *Settings) Save() error {
 		}
 	}
 
-	// 托管键一律写**有效值** (空值回退默认值), 不再出现 log_level = "" 这种
-	// "文件说空、config get 说 info" 的错位 (v1.5.0 用户反馈)。
 	w("\n[core]\n")
 	w("allow_lan = %v\n", s.AllowLan)
 	w("mixed_port = %s\n", tomlStr(orDef(s.MixedPort, "7890")))
@@ -618,7 +381,67 @@ func (s *Settings) Save() error {
 	return err
 }
 
-// fixup 兜底修正与旧键迁移
+// orDef 空值回退默认值 (Save 写托管键时用, 保证文件和 config get 完全一致)
+func orDef(v, def string) string {
+	if v == "" || v == "sub" {
+		return def
+	}
+	return v
+}
+
+func orInt(v, def int) int {
+	if v <= 0 {
+		return def
+	}
+	return v
+}
+
+func tomlStr(s string) string { return fmt.Sprintf("%q", s) }
+
+func tomlArr(items []string) string {
+	var ps []string
+	for _, it := range items {
+		ps = append(ps, tomlStr(it))
+	}
+	return strings.Join(ps, ", ")
+}
+
+// FindProfile 按名字找订阅
+func (s *Settings) FindProfile(name string) *Profile {
+	for i := range s.Profiles {
+		if s.Profiles[i].Name == name {
+			return &s.Profiles[i]
+		}
+	}
+	return nil
+}
+
+// Current 返回当前生效的订阅 (current_profile 为空时悬空, 返回 nil)
+func (s *Settings) Current() *Profile {
+	return s.FindProfile(s.CurrentProfile)
+}
+
+// CurrentUpdatedAt 当前订阅的更新时间 (没有订阅时给零值, 免得到处判空)
+func (s *Settings) CurrentUpdatedAt() time.Time {
+	if p := s.Current(); p != nil {
+		return p.UpdatedAt
+	}
+	return time.Time{}
+}
+
+// EnabledRules 仅启用的用户规则
+func (s *Settings) EnabledRules() []string {
+	var out []string
+	for _, r := range s.UserRules {
+		if r.Enabled {
+			out = append(out, r.String())
+		}
+	}
+	return out
+}
+
+// fixup 兜底修正: 读盘后把空值/非法值拉回合法区间。
+// 注意这里只做"不缺字段"的兜底, 不做任何格式迁移 (v1.5.1 起不再支持旧版配置)。
 func (s *Settings) fixup() {
 	if s.MixedPort == "" {
 		s.MixedPort = "7890"
@@ -678,11 +501,11 @@ func (s *Settings) fixup() {
 	if s.Language != "zh" && s.Language != "en" {
 		s.Language = ""
 	}
-	// github-mirror: auto / http(s)://host ; 旧版遗留的非法值(auto1 等)置空回退 auto
+	// github-mirror: auto / http(s)://host; 非法值置空回退 auto
 	if s.GithubMirror != "" && !validMirror(s.GithubMirror) {
 		s.GithubMirror = ""
 	}
-	// 丢弃无效规则 (空类型/迁移残留)
+	// 丢弃空类型的规则 (SetGeneric 之类可能写进来)
 	valid := s.UserRules[:0]
 	for _, r := range s.UserRules {
 		if r.Type != "" {
@@ -695,103 +518,10 @@ func (s *Settings) fixup() {
 	}
 }
 
-// validMirror 镜像站前缀形态校验 (L1): auto 或 http(s)://host
+// validMirror 镜像站前缀形态校验: auto / 空 / http(s)://host
 func validMirror(v string) bool {
 	if v == "auto" || v == "" {
 		return true
 	}
 	return strings.HasPrefix(v, "http://") || strings.HasPrefix(v, "https://")
-}
-
-// renameV15 v1.5.0 的键名/段落调整 (就地改 out):
-//   - core.dns_servers → overrides.dns.nameserver (它本来就是 dns 段的东西)
-//   - timer.auto_select_last_run → timer.node_auto_select_last_run
-//   - timer.resource_last_run     → timer.resource_auto_update_last_run
-func renameV15(out map[string]any) {
-	if core, ok := out["core"].(map[string]any); ok {
-		if ns, ok := core["dns_servers"]; ok {
-			delete(core, "dns_servers")
-			ov, _ := out["overrides"].(map[string]any)
-			if ov == nil {
-				ov = map[string]any{}
-				out["overrides"] = ov
-			}
-			dns, _ := ov["dns"].(map[string]any)
-			if dns == nil {
-				dns = map[string]any{}
-				ov["dns"] = dns
-			}
-			dns["nameserver"] = ns
-		}
-	}
-	if tm, ok := out["timer"].(map[string]any); ok {
-		for _, r := range [][2]string{
-			{"auto_select_last_run", "node_auto_select_last_run"},
-			{"resource_last_run", "resource_auto_update_last_run"},
-		} {
-			if v, ok := tm[r[0]]; ok {
-				delete(tm, r[0])
-				tm[r[1]] = v
-			}
-		}
-	}
-}
-
-// orDef 空值回退默认值 (Save 写托管键时用, 保证文件和 config get 完全一致)
-func orDef(v, def string) string {
-	if v == "" || v == "sub" {
-		return def
-	}
-	return v
-}
-
-func orInt(v, def int) int {
-	if v <= 0 {
-		return def
-	}
-	return v
-}
-
-func tomlStr(s string) string { return fmt.Sprintf("%q", s) }
-
-func tomlArr(items []string) string {
-	var ps []string
-	for _, it := range items {
-		ps = append(ps, tomlStr(it))
-	}
-	return strings.Join(ps, ", ")
-}
-
-// FindProfile 按名字找订阅
-func (s *Settings) FindProfile(name string) *Profile {
-	for i := range s.Profiles {
-		if s.Profiles[i].Name == name {
-			return &s.Profiles[i]
-		}
-	}
-	return nil
-}
-
-// Current 返回当前生效的订阅 (current_profile 为空时悬空, 返回 nil)
-func (s *Settings) Current() *Profile {
-	return s.FindProfile(s.CurrentProfile)
-}
-
-// CurrentUpdatedAt 当前订阅的更新时间 (没有订阅时给零值, 免得到处判空)
-func (s *Settings) CurrentUpdatedAt() time.Time {
-	if p := s.Current(); p != nil {
-		return p.UpdatedAt
-	}
-	return time.Time{}
-}
-
-// EnabledRules 仅启用的用户规则
-func (s *Settings) EnabledRules() []string {
-	var out []string
-	for _, r := range s.UserRules {
-		if r.Enabled {
-			out = append(out, r.String())
-		}
-	}
-	return out
 }

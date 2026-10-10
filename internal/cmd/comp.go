@@ -1,16 +1,13 @@
 package cmd
 
 import (
-	"fmt"
 	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/wubinstu/mihomo-cli/internal/api"
-	"github.com/wubinstu/mihomo-cli/internal/app"
 	"github.com/wubinstu/mihomo-cli/internal/cfg"
-	"github.com/wubinstu/mihomo-cli/internal/subs"
 )
 
 // ---- 补全数据源 (全部零副作用: 服务没起/配置读不到就返回空, 绝不退出进程) ----
@@ -35,7 +32,7 @@ func subCompletions(toComplete string) []string {
 			out = append(out, id)
 		}
 	}
-	return dedupStr(out)
+	return cfg.Dedup(out)
 }
 
 // groupCompletions 分组名 + #id (需要内核 API; 失败时静默返回空)
@@ -58,7 +55,7 @@ func groupCompletions(toComplete string) []string {
 			out = append(out, g.Name)
 		}
 	}
-	return dedupStr(out)
+	return cfg.Dedup(out)
 }
 
 // nodeCompletions 当前分组的节点名 + #id; flagGroup 优先, 否则 current_group
@@ -86,7 +83,7 @@ func nodeCompletions(toComplete, flagGroup string) []string {
 			out = append(out, n)
 		}
 	}
-	return dedupStr(out)
+	return cfg.Dedup(out)
 }
 
 func firstNon(vs ...string) string {
@@ -96,19 +93,6 @@ func firstNon(vs ...string) string {
 		}
 	}
 	return ""
-}
-
-func dedupStr(in []string) []string {
-	seen := map[string]bool{}
-	out := make([]string, 0, len(in))
-	for _, s := range in {
-		if s == "" || seen[s] {
-			continue
-		}
-		seen[s] = true
-		out = append(out, s)
-	}
-	return out
 }
 
 // priorityCompletions 只保留前缀匹配的项 (TAB 输入了一部分时)
@@ -121,9 +105,6 @@ func priorityCompletions(list []string, toComplete string) []string {
 		if strings.HasPrefix(strings.ToLower(v), strings.ToLower(toComplete)) {
 			out = append(out, v)
 		}
-	}
-	if len(out) == 0 {
-		return out
 	}
 	return out
 }
@@ -212,12 +193,6 @@ func installArgComp(c *cobra.Command, fn func(*cobra.Command, []string, string) 
 		c.ValidArgsFunction = fn
 	}
 }
-
-var (
-	_ = fmt.Sprintf
-	_ = subs.Sanitize
-	_ = app.BaseDir
-)
 
 // keyCompletion 键名补全的统一入口: 处理好"半截点号路径"的情况。
 // 用户敲 `config set core. <TAB>`(点号后带空格)时, cobra 把 "core." 当作已输入的参数、

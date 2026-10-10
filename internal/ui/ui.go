@@ -3,7 +3,6 @@ package ui
 
 import (
 	"fmt"
-	"github.com/wubinstu/mihomo-cli/internal/subs"
 	"io"
 	"os"
 	"strings"
@@ -100,22 +99,6 @@ func ColorDelay(ms int) string {
 
 // WarnMark 体检标记: 黄叹号 (颜色关闭时为 !)
 func WarnMark() string { return Paint("\x1b[33m", "!") }
-
-// QuotaText 订阅用量摘要 + 按状态上色 (到期/超额红, 快用完黄, 其余原样)
-func QuotaText(userinfo string) string {
-	q := subs.ParseQuota(userinfo)
-	if q == nil {
-		return "-"
-	}
-	txt := q.Short()
-	switch q.State() {
-	case "expired", "out":
-		return Paint("\x1b[31m", txt)
-	case "low":
-		return Paint("\x1b[33m", txt)
-	}
-	return txt
-}
 
 // OK / ErrMark 体检标记: 绿勾 / 红叉 (T(颜色)关闭时为 ✔ / ✘)
 func OKMark() string  { return Paint("\x1b[32m", "✔") }

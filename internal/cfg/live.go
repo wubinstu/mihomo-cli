@@ -208,6 +208,21 @@ func toInt(v any) (int64, bool) {
 	return 0, false
 }
 
+// TunInfo 运行态里 tun 段的简况 (status 用); 服务没起/没有 tun 段时 ok=false
+func (l *Live) TunInfo() (on bool, device, stack string, ok bool) {
+	if l == nil || l.cfg == nil {
+		return false, "", "", false
+	}
+	tun, _ := l.cfg["tun"].(map[string]any)
+	if tun == nil {
+		return false, "", "", false
+	}
+	on, _ = tun["enable"].(bool)
+	device = scalarStr(tun["device"])
+	stack = scalarStr(tun["stack"])
+	return on, device, stack, true
+}
+
 // Compared 该键是否参与"运行态 vs 设置值"的比对。
 // 未接管的点号路径键不参与: 订阅/内核爱用什么值用什么, 我们不置喙,
 // 否则会拿我们的默认值和内核的默认值刷出一片假差异 (v1.4 踩过)。
@@ -290,11 +305,6 @@ func (l *Live) Pull(k Key) (string, error) {
 		return "", fmt.Errorf("%s: %s", k.Name, i18n.T("内核未返回该值, 不可回写"))
 	}
 	return v, nil
-}
-
-// PushTimer 定时任务侧: 用 config.toml 的设置重写并启停 timer
-func PushTimers(s *app.Settings) error {
-	return sysd.InstallTimers(s)
 }
 
 // CoreVersionFromBinary 从已安装内核二进制读版本号 (v1.19.31)

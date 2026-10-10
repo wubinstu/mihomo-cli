@@ -8,7 +8,6 @@ import (
 
 	"github.com/wubinstu/mihomo-cli/internal/app"
 	"github.com/wubinstu/mihomo-cli/internal/i18n"
-	"gopkg.in/yaml.v3"
 )
 
 // TestURLPresets 测速端点预设 (config set test-url 的补全与默认值同形)
@@ -204,10 +203,10 @@ var Keys = []Key{
 		}},
 	{Name: "cli.current-profile", Section: "cli", Kind: KindState,
 		Usage: "当前生效订阅 (只读; 用 sub use 切换)",
-		Get:   func(s *app.Settings) string { return orDash(s.CurrentProfile) }},
+		Get:   func(s *app.Settings) string { return OrDash(s.CurrentProfile) }},
 	{Name: "cli.current-group", Section: "cli", Kind: KindState,
 		Usage: "当前操作分组 (只读; 用 group use 切换)",
-		Get:   func(s *app.Settings) string { return orDash(s.CurrentGroup) }},
+		Get:   func(s *app.Settings) string { return OrDash(s.CurrentGroup) }},
 
 	// ---- systemd timers ----
 	{Name: "timer.sub-auto-update-enabled", Section: "timer", Kind: KindBool, Def: "true",
@@ -729,25 +728,6 @@ func OverrideSection(s *app.Settings, section string) map[string]any {
 	return m
 }
 
-// CloneSection 深拷贝一段 (测试/渲染用)
-func CloneSection(m map[string]any) map[string]any {
-	out := map[string]any{}
-	for k, v := range m {
-		if sub, ok := v.(map[string]any); ok {
-			out[k] = CloneSection(sub)
-			continue
-		}
-		out[k] = v
-	}
-	return out
-}
-
-// YAMLOf 把一段转成 yaml (仅测试用)
-func YAMLOf(m map[string]any) string {
-	b, _ := yaml.Marshal(m)
-	return string(b)
-}
-
 // ---- 小工具 ----
 
 func boolStr(b bool) string {
@@ -757,7 +737,8 @@ func boolStr(b bool) string {
 	return "false"
 }
 
-func orDash(s string) string {
+// OrDash 空值显示成 "-" (表格单元格用)
+func OrDash(s string) string {
 	if s == "" {
 		return "-"
 	}

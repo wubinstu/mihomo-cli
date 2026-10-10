@@ -60,9 +60,6 @@ func (c *Client) GetJSON(path string, out any) error {
 	return json.NewDecoder(resp.Body).Decode(out)
 }
 
-// GetJSONStruct 同 GetJSON (别名, 语义化导出)
-func (c *Client) GetJSONStruct(path string, out any) error { return c.GetJSON(path, out) }
-
 // PatchConfig 热更新部分内核配置 (如 log-level)
 func (c *Client) PatchConfig(body map[string]any) error {
 	resp, err := c.do("PATCH", "/configs", body)
@@ -154,15 +151,6 @@ func (c *Client) Connections() (*ConnsResp, error) {
 	return &r, nil
 }
 
-func (c *Client) CloseConns() error {
-	resp, err := c.do("DELETE", "/connections", nil)
-	if err != nil {
-		return err
-	}
-	resp.Body.Close()
-	return nil
-}
-
 // CloseConn 关闭指定连接
 func (c *Client) CloseConn(id string) error {
 	req, err := http.NewRequest("DELETE", c.base+"/connections/"+url.PathEscape(id), nil)
@@ -195,20 +183,6 @@ func (c *Client) Reload(path string) error {
 	return nil
 }
 
-// SetMode 热切换代理模式 (rule/global/direct)
-func (c *Client) SetMode(mode string) error {
-	resp, err := c.do("PATCH", "/configs", map[string]string{"mode": mode})
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 204 && resp.StatusCode != 200 {
-		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return fmt.Errorf("%s %d: %s", i18n.T("切换失败"), resp.StatusCode, string(b))
-	}
-	return nil
-}
-
 // LastDelay 取节点最近一次历史延迟 (ms), 无历史返回 -1
 func (c *Client) LastDelay(name string) int {
 	var p struct {
@@ -233,11 +207,6 @@ func (c *Client) ConfigMode() (string, error) {
 		return "", err
 	}
 	return cfg.Mode, nil
-}
-
-// Stream 返回流式响应(用于 /traffic)
-func (c *Client) Stream(path string) (*http.Response, error) {
-	return c.do("GET", path, nil)
 }
 
 func (c *Client) Version() (string, error) {

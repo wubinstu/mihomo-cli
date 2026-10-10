@@ -103,12 +103,12 @@ func (q *Quota) State() string {
 func (q *Quota) Short() string {
 	var b strings.Builder
 	if q.Total > 0 {
-		fmt.Fprintf(&b, "%s/%s", bytesHuman(q.Used()), bytesHuman(q.Total))
+		fmt.Fprintf(&b, "%s/%s", BytesHuman(q.Used()), BytesHuman(q.Total))
 		if p := q.Percent(); p >= 0 {
 			fmt.Fprintf(&b, " (%.2f%%)", p)
 		}
 	} else if q.Used() > 0 {
-		b.WriteString(bytesHuman(q.Used()))
+		b.WriteString(BytesHuman(q.Used()))
 	}
 	sep := func() {
 		if b.Len() > 0 {
@@ -132,8 +132,9 @@ func (q *Quota) Short() string {
 	return b.String()
 }
 
-// bytesHuman 字节数转可读 (二进制单位, 和机场后台一致)
-func bytesHuman(n int64) string {
+// BytesHuman 字节数转可读。**十进制单位** (KB/MB/GB), 和机场后台的用量口径一致 ——
+// 内核 /traffic 那边的 humanBytes 是二进制 (KiB/MiB), 两者不能混用。
+func BytesHuman(n int64) string {
 	if n < 0 {
 		return "-"
 	}

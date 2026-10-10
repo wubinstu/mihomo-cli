@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"strings"
 
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
@@ -29,11 +28,7 @@ var dnsPresets = []struct {
 	{"dnspod", T("腾讯 DNSPod"), []string{"119.29.29.29", "182.252.116.116"}},
 }
 
-// presetNames 预设名列表 (帮助信息用)
 // presetNamesText 预设名的文字形式 (帮助信息用)
-func presetNamesText() string {
-	return strings.Join(dnsPresetNameList(), " / ")
-}
 
 // subDNS 从订阅文件提取 dns.nameserver
 func subDNS(name string) []string {
@@ -50,10 +45,6 @@ func subDNS(name string) []string {
 		return nil
 	}
 	return cfgYAML.DNS.Nameserver
-}
-
-func sameIPs(a, b []string) bool {
-	return strings.Join(a, ",") == strings.Join(b, ",")
 }
 
 // resolveDNSServers 解析 DNS 值: 预设名 | subN | 裸 IP (dns.nameserver 的值域)

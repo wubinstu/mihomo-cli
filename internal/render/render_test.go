@@ -3,7 +3,6 @@ package render
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -26,7 +25,6 @@ func setup(t *testing.T) *app.Settings {
 	app.CoreBin = filepath.Join(app.BinDir, "mihomo")
 	app.CoreBinOld = filepath.Join(app.BinDir, "mihomo.old")
 	app.SettingsFile = filepath.Join(dir, "config.toml")
-	app.OverridesFile = filepath.Join(dir, "overrides.yaml")
 	app.RuntimeConfig = filepath.Join(app.RuntimeDir, "config.yaml")
 	app.LogFile = filepath.Join(app.LogDir, "mihomo.log")
 
@@ -231,27 +229,6 @@ func TestDeepMerge(t *testing.T) {
 	}
 }
 
-// overrides.yaml 收编进 config.toml [overrides]
-func TestLegacyOverridesMigrated(t *testing.T) {
-	s := setup(t)
-	if err := s.Save(); err != nil { // 先造出 config.toml, 否则 LoadSettings 走"文件不存在"分支
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(app.OverridesFile, []byte("tun:\n  enable: true\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	loaded, err := app.LoadSettings()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(loaded.Overrides) == 0 {
-		t.Fatal("overrides.yaml should be migrated into config.toml")
-	}
-	if _, statErr := os.Stat(app.OverridesFile); statErr == nil {
-		t.Error("legacy overrides.yaml should be renamed away after migration")
-	}
-}
-
 // 端口字符串别名: off/0/none/- 都等于不监听
 func TestPortNumAliases(t *testing.T) {
 	for _, v := range []string{"off", "0", "none", "-", "", "sub"} {
@@ -268,8 +245,6 @@ func TestPortNumAliases(t *testing.T) {
 		t.Error("out-of-range port must be rejected")
 	}
 }
-
-var _ = strings.TrimSpace
 
 // core 段的每一个键都必须被注入, 且类型必须对 (bool 不能写成字符串)。
 // v1.4.1 连续两个 bug 都是这一类: 漏注入 (ipv6-enabled) / 类型错 (KindTri 当字符串)。

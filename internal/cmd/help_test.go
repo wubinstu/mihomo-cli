@@ -304,7 +304,6 @@ func sandbox(t *testing.T) string {
 	app.CoreBin = filepath.Join(app.BinDir, "mihomo")
 	app.CoreBinOld = filepath.Join(app.BinDir, "mihomo.old")
 	app.SettingsFile = filepath.Join(dir, "config.toml")
-	app.OverridesFile = filepath.Join(dir, "overrides.yaml")
 	app.RuntimeConfig = filepath.Join(app.RuntimeDir, "config.yaml")
 	app.LogFile = filepath.Join(app.LogDir, "mihomo.log")
 	if err := os.MkdirAll(app.ProfileDir, 0o755); err != nil {

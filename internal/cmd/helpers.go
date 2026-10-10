@@ -7,6 +7,8 @@ import (
 
 	"github.com/wubinstu/mihomo-cli/internal/app"
 	"github.com/wubinstu/mihomo-cli/internal/cfg"
+	"github.com/wubinstu/mihomo-cli/internal/subs"
+	"github.com/wubinstu/mihomo-cli/internal/ui"
 )
 
 // cfgLookup 注册键查找 (包内简写)
@@ -42,4 +44,21 @@ func mustSettingsQuiet() *app.Settings {
 		return nil
 	}
 	return s
+}
+
+// quotaCell 订阅用量单元格: 摘要 + 按状态上色 (到期/超额红, 快用完黄)。
+// 放在 cmd 而不是 ui: ui 是纯展示层, 不该反向依赖 subs。
+func quotaCell(userinfo string) string {
+	q := subs.ParseQuota(userinfo)
+	if q == nil {
+		return "-"
+	}
+	txt := q.Short()
+	switch q.State() {
+	case "expired", "out":
+		return ui.Paint("\x1b[31m", txt)
+	case "low":
+		return ui.Paint("\x1b[33m", txt)
+	}
+	return txt
 }

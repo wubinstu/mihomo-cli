@@ -52,7 +52,6 @@ var updateCmd = &cobra.Command{
 		defer os.RemoveAll(tmp)
 		tgz := filepath.Join(tmp, "pkg.tgz")
 
-		_ = hc
 		if err := core.FetchURL(assetURL, updProxy, mustSettings().GithubMirror, tgz); err != nil {
 			return err
 		}
@@ -107,8 +106,6 @@ var updateCmd = &cobra.Command{
 			return fmt.Errorf("%s: %s", err, strings.TrimSpace(string(out)))
 		}
 		fmt.Printf("%s %s\n", T("已安装"), self)
-		after, _ := os.Executable()
-		_ = after
 		return nil
 	},
 }

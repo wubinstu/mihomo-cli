@@ -79,11 +79,6 @@ func CountNodes(data []byte) int {
 	return len(m.Proxies)
 }
 
-// Add 新增订阅: 下载 + 保存 (激活遵循 activate)
-func Add(s *app.Settings, name, rawurl, proxy string) error {
-	return Add2(s, name, rawurl, proxy, s.CurrentProfile == "" && len(s.Profiles) == 0)
-}
-
 // Add2 新增订阅, activate 控制是否设为当前生效
 func Add2(s *app.Settings, name, rawurl, proxy string, activate bool) error {
 	name = Sanitize(name)

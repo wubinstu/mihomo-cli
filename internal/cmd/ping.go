@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -163,8 +162,6 @@ func itoa(n int) string {
 	}
 	return fmt.Sprintf("%d", n)
 }
-
-var _ = sort.Strings
 
 func init() {
 	rootCmd.AddCommand(pingCmd)

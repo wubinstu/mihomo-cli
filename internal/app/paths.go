@@ -1,8 +1,6 @@
 package app
 
 import (
-	"bufio"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,7 +18,6 @@ var (
 	CoreBin       = filepath.Join(BinDir, "mihomo") // 当前内核
 	CoreBinOld    = filepath.Join(BinDir, "mihomo.old")
 	SettingsFile  = filepath.Join(BaseDir, "config.toml")
-	OverridesFile = filepath.Join(BaseDir, "overrides.yaml")
 	RuntimeConfig = filepath.Join(RuntimeDir, "config.yaml")
 	LogFile       = filepath.Join(LogDir, "mihomo.log")
 )
@@ -31,49 +28,6 @@ func envOr(k, def string) string {
 		return v
 	}
 	return def
-}
-
-func init() {
-	// 一次性迁移: 旧版用户目录 ~/.config/mihomo-cli -> /etc/mihomo-cli (需 root)
-	legacy := legacyDir()
-	if os.Geteuid() == 0 && legacy != "" {
-		if _, err := os.Stat(BaseDir); os.IsNotExist(err) {
-			if _, err := os.Stat(legacy); err == nil {
-				_ = os.Rename(legacy, BaseDir)
-			}
-		}
-	}
-}
-
-func legacyDir() string {
-	// sudo 调用时取原用户家目录 (SUDO_USER)
-	if u := os.Getenv("SUDO_USER"); u != "" && u != "root" {
-		if home, err := homeOf(u); err == nil {
-			return filepath.Join(home, ".config", "mihomo-cli")
-		}
-	}
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
-		return ""
-	}
-	return filepath.Join(home, ".config", "mihomo-cli")
-}
-
-// homeOf 返回用户家目录 (查 /etc/passwd)
-func homeOf(user string) (string, error) {
-	f, err := os.Open("/etc/passwd")
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-	sc := bufio.NewScanner(f)
-	for sc.Scan() {
-		parts := strings.Split(sc.Text(), ":")
-		if len(parts) >= 6 && parts[0] == user {
-			return parts[5], nil
-		}
-	}
-	return "", fmt.Errorf("user %s not found", user)
 }
 
 // EnsureDirs 创建全部数据目录 (需要 root)
@@ -111,4 +65,4 @@ func HardenPerms() {
 }
 
 // Version mihomo-cli 版本号 (唯一来源; 配置迁移的备份名要带它, 所以不能放 cmd 包)
-const Version = "1.5.0"
+const Version = "1.5.1"

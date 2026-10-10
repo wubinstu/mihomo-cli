@@ -172,7 +172,7 @@ func (k Key) Top() string {
 }
 
 // SectionOrder 段展示顺序
-var SectionOrder = []string{"core", "cli", "timer", "core.dns", "core.tun"}
+var SectionOrder = []string{"core", "core.dns", "core.tun", "cli", "timer"}
 
 // SectionTitles 段标题 (展示用; 跟随语言)
 func SectionTitles(section string) string {
@@ -183,11 +183,8 @@ func SectionTitles(section string) string {
 		return i18n.T("cli")
 	case "timer":
 		return i18n.T("systemd timers")
-	case "core.dns":
-		return i18n.T("dns")
-	case "core.tun":
-		return i18n.T("tun")
 	}
+	// core.dns / core.tun 原样显示: 段名就是 CLI 键的前缀, 也是内核 yaml 的段名
 	return section
 }
 
@@ -246,9 +243,6 @@ func Names() []string {
 	return out
 }
 
-// SectionNames 段名 (补全用): 已注册的段 + 通用段提示
-func SectionNames() []string { return Sections() }
-
 // CompleteKeys key 位置的补全: 已注册键 + 段名 (前缀过滤)
 func CompleteKeys(prefix string) []string {
 	var out []string
@@ -262,19 +256,11 @@ func CompleteKeys(prefix string) []string {
 			out = append(out, s)
 		}
 	}
-	// 段内键补全: "tun." → tun.enable / tun.stack …
-	if i := strings.Index(prefix, "."); i > 0 {
-		sec := prefix[:i+1]
-		for _, k := range Keys {
-			if strings.HasPrefix(k.Name, sec) && strings.HasPrefix(k.Name, prefix) {
-				out = append(out, k.Name)
-			}
-		}
-	}
-	return dedup(out)
+	return Dedup(out)
 }
 
-func dedup(in []string) []string {
+// Dedup 原地去重 (保留首次出现的顺序), 跳过空串
+func Dedup(in []string) []string {
 	seen := map[string]bool{}
 	out := in[:0]
 	for _, s := range in {

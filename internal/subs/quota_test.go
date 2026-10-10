@@ -72,8 +72,8 @@ func TestBytesHuman(t *testing.T) {
 		0: "0B", 1023: "1023B", 1024: "1.00KB",
 		171798691840: "160.00GB", 1099511627776: "1.00TB",
 	} {
-		if got := bytesHuman(in); got != want {
-			t.Errorf("bytesHuman(%d) = %q, want %q", in, got, want)
+		if got := BytesHuman(in); got != want {
+			t.Errorf("BytesHuman(%d) = %q, want %q", in, got, want)
 		}
 	}
 }

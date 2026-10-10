@@ -206,11 +206,3 @@ func toAnyList(items []string) []any {
 	}
 	return out
 }
-
-// triValue 布尔三态键的类型转换
-func triValue(k *cfg.Key, v string) any {
-	if k.Kind == cfg.KindBool || k.Kind == cfg.KindTri {
-		return v == "true"
-	}
-	return v
-}

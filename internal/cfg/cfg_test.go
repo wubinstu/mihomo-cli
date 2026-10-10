@@ -258,10 +258,10 @@ func TestPortDefaults(t *testing.T) {
 	}
 }
 
-// 段排序: core → cli → timer → core.dns → core.tun (段名 = CLI 键前缀)
+// 段排序: 内核相关在前 (core/core.dns/core.tun), CLI 自身在后 (cli/timer)
 func TestSectionOrder(t *testing.T) {
 	got := Sections()
-	want := []string{"core", "cli", "timer", "core.dns", "core.tun"}
+	want := []string{"core", "core.dns", "core.tun", "cli", "timer"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("sections = %v, want %v", got, want)
 	}

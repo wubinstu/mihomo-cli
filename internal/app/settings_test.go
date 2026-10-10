@@ -20,7 +20,6 @@ func setup(t *testing.T) {
 	CoreBin = filepath.Join(BinDir, "mihomo")
 	CoreBinOld = filepath.Join(BinDir, "mihomo.old")
 	SettingsFile = filepath.Join(dir, "config.toml")
-	OverridesFile = filepath.Join(dir, "overrides.yaml")
 	RuntimeConfig = filepath.Join(RuntimeDir, "config.yaml")
 	LogFile = filepath.Join(LogDir, "mihomo.log")
 }
@@ -76,113 +75,6 @@ func TestSettingsRoundTrip(t *testing.T) {
 	}
 	if len(back.UserRules) != 1 || len(back.Profiles) != 1 {
 		t.Errorf("tables lost: %d %d", len(back.UserRules), len(back.Profiles))
-	}
-}
-
-// 旧格式 (<=v1.4.0 扁平键) 必须能迁移, 且一个值都不能丢
-func TestLegacyFlatFormatMigrates(t *testing.T) {
-	setup(t)
-	legacy := `cli_language = "zh"
-current_profile = "EDT"
-current_group = "节点选择"
-github_mirror = "auto1"
-core_platform = "linux/amd64"
-core_flavor = "v3"
-core_version = "v1.19.31"
-allow_lan = true
-mixed_port = 7890
-socks_port = 7891
-http_port = 7892
-proxy_mode = "rule"
-ipv6_enabled = true
-log_level = "info"
-dns_servers = ["https://a/dns-query"]
-tcp_concurrent = true
-unified_delay = false
-keep_alive_interval = 30
-api_base = "http://127.0.0.1:9090"
-api_secret = "sec"
-sub_auto_update_enabled = true
-sub_auto_update_interval = "24h0m0s"
-node_auto_select_enabled = true
-node_auto_select_interval = "30m0s"
-resource_auto_update_enabled = true
-resource_auto_update_interval = "24h0m0s"
-test_url = "https://www.gstatic.com/generate_204"
-test_timeout_ms = 5000
-
-[[user_rules]]
-type = "DOMAIN"
-condition = "x.com"
-strategy = "DIRECT"
-enabled = true
-
-[[profiles]]
-name = "EDT"
-url = "https://x/sub"
-updated_at = 2026-09-26T09:52:36+08:00
-nodes = 16
-`
-	if err := os.WriteFile(SettingsFile, []byte(legacy), 0o640); err != nil {
-		t.Fatal(err)
-	}
-	s, err := LoadSettings()
-	if err != nil {
-		t.Fatalf("legacy migrate failed: %v", err)
-	}
-	// 每个字段逐一核对 (丢一个就是这个测试存在的意义)
-	checks := []struct {
-		name string
-		got  any
-		want any
-	}{
-		{"language", s.Language, "zh"},
-		{"current_profile", s.CurrentProfile, "EDT"},
-		{"current_group", s.CurrentGroup, "节点选择"},
-		{"github_mirror", s.GithubMirror, ""}, // auto1 非法 → 置空
-		{"platform", s.Platform, "linux/amd64"},
-		{"flavor", s.Flavor, "v3"},
-		{"version", s.Version, "v1.19.31"},
-		{"allow_lan", s.AllowLan, true},
-		{"mixed_port", s.MixedPort, "7890"},
-		{"socks_port", s.SocksPort, "7891"},
-		{"http_port", s.HTTPPort, "7892"},
-		{"proxy_mode", s.ProxyMode, "rule"},
-		{"ipv6_enabled", s.IPV6Enabled, true},
-		{"log_level", s.LogLevel, "info"},
-		{"tcp_concurrent", s.TCPConcurrent, "true"},
-		{"unified_delay", s.UnifiedDelay, "false"},
-		{"keep_alive_interval", s.KeepAliveInterval, "30"},
-		{"base", s.Base, "http://127.0.0.1:9090"},
-		{"secret", s.Secret, "sec"},
-		{"sub_auto_update_enabled", s.SubAutoUpdateEnabled, true},
-		{"sub_auto_update_interval", s.SubAutoUpdateInterval, 24 * time.Hour},
-		{"node_auto_select_enabled", s.NodeAutoSelectEnabled, true},
-		{"node_auto_select_interval", s.NodeAutoSelectInterval, 30 * time.Minute},
-		{"resource_auto_update_enabled", s.ResourceAutoUpdateEnabled, true},
-		{"test_url", s.TestURL, "https://www.gstatic.com/generate_204"},
-		{"test_timeout_ms", s.TestTimeout, 5000},
-	}
-	for _, c := range checks {
-		if c.got != c.want {
-			t.Errorf("%s = %#v, want %#v", c.name, c.got, c.want)
-		}
-	}
-	// dns_servers 已从 [core] 挪到 [overrides.dns] nameserver (v1.5.0)
-	ns, _ := s.Overrides["dns"].(map[string]any)["nameserver"].([]any)
-	if len(ns) != 1 || ns[0] != "https://a/dns-query" {
-		t.Errorf("dns_servers lost: %#v", s.Overrides)
-	}
-	if len(s.UserRules) != 1 || len(s.Profiles) != 1 {
-		t.Errorf("tables lost: %d %d", len(s.UserRules), len(s.Profiles))
-	}
-	// 迁移要留备份, 并把文件重排成新格式
-	if _, err := os.Stat(SettingsFile + ".pre-" + Version + ".bak"); err != nil {
-		t.Error("legacy config should be backed up")
-	}
-	data, _ := os.ReadFile(SettingsFile)
-	if !contains(string(data), "[core]") || !contains(string(data), "[cli]") {
-		t.Errorf("file not rewritten to the new format:\n%s", data)
 	}
 }
 

@@ -2,8 +2,6 @@ package core
 
 import (
 	"compress/gzip"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -46,9 +44,7 @@ func HTTPClient(proxy string) *http.Client {
 
 // ---- 平台与风味 (内核安装包规格的两个正交轴) ----
 
-// ArchName 返回 mihomo release 资产中的架构名; arch 为空则按当前系统检测
-func ArchName() string { return archName(runtime.GOARCH) }
-
+// archName Go 架构名 → mihomo release 资产里的架构名 (arm → armv7)
 func archName(goarch string) string {
 	switch goarch {
 	case "arm":
@@ -718,33 +714,6 @@ func UpdateAllResources(proxy, mirror string) error {
 		return fmt.Errorf("%s", strings.Join(errs, "; "))
 	}
 	return nil
-}
-
-// DownloadGeo 预下载 geo 数据到 runtime 目录 (install 调用: mmdb+geosite)
-func DownloadGeo(proxy, mirrorPref string) error {
-	for _, name := range []string{"mmdb", "geosite"} {
-		if _, ok, _, _ := ResourceInfo(name); ok {
-			continue
-		}
-		if err := UpdateResource(name, proxy, mirrorPref); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// SHA256 文件摘要 (测试/校验用)
-func SHA256(path string) (string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(h.Sum(nil))[:12], nil
 }
 
 func copyFile(src, dst string) error {
