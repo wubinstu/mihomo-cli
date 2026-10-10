@@ -77,17 +77,16 @@ type CoreSpec struct {
 
 // Core 注入内核 config.yaml 的参数
 type Core struct {
-	AllowLan          bool     `toml:"allow_lan"`
-	MixedPort         string   `toml:"mixed_port"` // 端口|off|sub; 默认 7890
-	SocksPort         string   `toml:"socks_port"` // 默认 off
-	HTTPPort          string   `toml:"http_port"`  // 默认 off
-	ProxyMode         string   `toml:"proxy_mode"` // rule/global/direct/sub
-	IPV6Enabled       bool     `toml:"ipv6_enabled,omitempty"`
-	LogLevel          string   `toml:"log_level,omitempty"` // debug/info/warning/error/silent/sub
-	DNSServers        []string `toml:"dns_servers,omitempty"`
-	TCPConcurrent     string   `toml:"tcp_concurrent,omitempty"`      // true|false|sub
-	UnifiedDelay      string   `toml:"unified_delay,omitempty"`       // true|false|sub
-	KeepAliveInterval string   `toml:"keep_alive_interval,omitempty"` // 秒 | sub
+	AllowLan          bool   `toml:"allow_lan"`
+	MixedPort         string `toml:"mixed_port"` // 端口|off|sub; 默认 7890
+	SocksPort         string `toml:"socks_port"` // 默认 off
+	HTTPPort          string `toml:"http_port"`  // 默认 off
+	ProxyMode         string `toml:"proxy_mode"` // rule/global/direct/sub
+	IPV6Enabled       bool   `toml:"ipv6_enabled,omitempty"`
+	LogLevel          string `toml:"log_level,omitempty"`           // debug/info/warning/error/silent/sub
+	TCPConcurrent     string `toml:"tcp_concurrent,omitempty"`      // true|false|sub
+	UnifiedDelay      string `toml:"unified_delay,omitempty"`       // true|false|sub
+	KeepAliveInterval string `toml:"keep_alive_interval,omitempty"` // 秒 | sub
 }
 
 // ControlAPI 外部控制 API
@@ -102,10 +101,10 @@ type Timer struct {
 	SubAutoUpdateInterval      time.Duration `toml:"sub_auto_update_interval"`
 	NodeAutoSelectEnabled      bool          `toml:"node_auto_select_enabled"`
 	NodeAutoSelectInterval     time.Duration `toml:"node_auto_select_interval"`
-	AutoSelectLastRun          time.Time     `toml:"auto_select_last_run,omitempty"`
+	AutoSelectLastRun          time.Time     `toml:"node_auto_select_last_run,omitempty"`
 	ResourceAutoUpdateEnabled  bool          `toml:"resource_auto_update_enabled"`
 	ResourceAutoUpdateInterval time.Duration `toml:"resource_auto_update_interval"`
-	ResourceLastRun            time.Time     `toml:"resource_last_run,omitempty"`
+	ResourceLastRun            time.Time     `toml:"resource_auto_update_last_run,omitempty"`
 }
 
 // Misc 其它 cli 设置
@@ -296,27 +295,27 @@ func legacyNormalize(data []byte) ([]byte, error) {
 	}
 	// 旧键名 → (新表, 新键名)
 	move := map[string][2]string{
-		"cli_language":                  {"cli", "language"},
-		"current_profile":               {"cli", "current_profile"},
-		"current_group":                 {"cli", "current_group"},
-		"github_mirror":                 {"cli", "github_mirror"},
-		"core_platform":                 {"core-spec", "platform"},
-		"core_flavor":                   {"core-spec", "flavor"},
-		"core_version":                  {"core-spec", "version"},
-		"allow_lan":                     {"core", "allow_lan"},
-		"ipv6_enabled":                  {"core", "ipv6_enabled"},
-		"log_level":                     {"core", "log_level"},
-		"dns_servers":                   {"core", "dns_servers"},
+		"cli_language":    {"cli", "language"},
+		"current_profile": {"cli", "current_profile"},
+		"current_group":   {"cli", "current_group"},
+		"github_mirror":   {"cli", "github_mirror"},
+		"core_platform":   {"core-spec", "platform"},
+		"core_flavor":     {"core-spec", "flavor"},
+		"core_version":    {"core-spec", "version"},
+		"allow_lan":       {"core", "allow_lan"},
+		"ipv6_enabled":    {"core", "ipv6_enabled"},
+		"log_level":       {"core", "log_level"},
+
 		"api_base":                      {"control-api", "base"},
 		"api_secret":                    {"control-api", "secret"},
 		"sub_auto_update_enabled":       {"timer", "sub_auto_update_enabled"},
 		"sub_auto_update_interval":      {"timer", "sub_auto_update_interval"},
 		"node_auto_select_enabled":      {"timer", "node_auto_select_enabled"},
 		"node_auto_select_interval":     {"timer", "node_auto_select_interval"},
-		"auto_select_last_run":          {"timer", "auto_select_last_run"},
+		"auto_select_last_run":          {"timer", "node_auto_select_last_run"},
 		"resource_auto_update_enabled":  {"timer", "resource_auto_update_enabled"},
 		"resource_auto_update_interval": {"timer", "resource_auto_update_interval"},
-		"resource_last_run":             {"timer", "resource_last_run"},
+		"resource_last_run":             {"timer", "resource_auto_update_last_run"},
 		"test_url":                      {"misc", "test_url"},
 		"test_timeout_ms":               {"misc", "test_timeout_ms"},
 	}
@@ -341,6 +340,19 @@ func legacyNormalize(data []byte) ([]byte, error) {
 				out["core"] = tbl
 			}
 			tbl[k] = legacyPort(v)
+		case "dns_servers":
+			// ≤v1.4.2 它躺在 [core] 里, 但语义上是 dns 段的 nameserver, 挪进 [overrides.dns]
+			ov, _ := out["overrides"].(map[string]any)
+			if ov == nil {
+				ov = map[string]any{}
+				out["overrides"] = ov
+			}
+			dns, _ := ov["dns"].(map[string]any)
+			if dns == nil {
+				dns = map[string]any{}
+				ov["dns"] = dns
+			}
+			dns["nameserver"] = legacyStrList(v)
 		case "proxy_mode":
 			tbl, _ := out["core"].(map[string]any)
 			if tbl == nil {
@@ -378,14 +390,19 @@ func legacyNormalize(data []byte) ([]byte, error) {
 			out[k] = v
 		}
 	}
-	var buf strings.Builder
-	if err := toml.NewEncoder(&buf).Encode(out); err != nil {
-		return nil, err
-	}
-	return []byte(buf.String()), nil
+	renameV15(out)
+	return toml.Marshal(out)
 }
 
 // legacyPort int 端口 → "7891" / "off"
+// legacyStrList 旧格式里的字符串列表 (interface{} → []any)
+func legacyStrList(v any) []any {
+	if l, ok := v.([]any); ok {
+		return l
+	}
+	return nil
+}
+
 func legacyPort(v any) string {
 	if n, ok := v.(int64); ok {
 		if n > 0 {
@@ -463,7 +480,8 @@ func randSecret() string {
 // backupLegacyConfig 把旧格式 config.toml 备份为 config.toml.pre-1.5.bak
 // (只做一次: 目标已存在就跳过)。格式迁移是会改变文件内容的动作, 必须留后路。
 func backupLegacyConfig() {
-	bak := SettingsFile + ".pre-1.5.bak"
+	// 备份名带版本号: 每一轮迁移各自留档, 不会把上一轮的备份覆盖掉
+	bak := SettingsFile + ".pre-" + Version + ".bak"
 	if _, err := os.Stat(bak); err == nil {
 		return
 	}
@@ -512,26 +530,19 @@ func (s *Settings) Save() error {
 		}
 	}
 
+	// 托管键一律写**有效值** (空值回退默认值), 不再出现 log_level = "" 这种
+	// "文件说空、config get 说 info" 的错位 (v1.5.0 用户反馈)。
 	w("\n[core]\n")
 	w("allow_lan = %v\n", s.AllowLan)
-	w("mixed_port = %s\n", tomlStr(s.MixedPort))
-	w("socks_port = %s\n", tomlStr(s.SocksPort))
-	w("http_port = %s\n", tomlStr(s.HTTPPort))
-	w("proxy_mode = %s\n", tomlStr(s.ProxyMode))
+	w("mixed_port = %s\n", tomlStr(orDef(s.MixedPort, "7890")))
+	w("socks_port = %s\n", tomlStr(orDef(s.SocksPort, "off")))
+	w("http_port = %s\n", tomlStr(orDef(s.HTTPPort, "off")))
+	w("proxy_mode = %s\n", tomlStr(orDef(s.ProxyMode, "rule")))
 	w("ipv6_enabled = %v\n", s.IPV6Enabled)
-	w("log_level = %s\n", tomlStr(s.LogLevel))
-	if len(s.DNSServers) > 0 {
-		w("dns_servers = [%s]\n", tomlArr(s.DNSServers))
-	}
-	if s.TCPConcurrent != "" && s.TCPConcurrent != "sub" {
-		w("tcp_concurrent = %s\n", tomlStr(s.TCPConcurrent))
-	}
-	if s.UnifiedDelay != "" && s.UnifiedDelay != "sub" {
-		w("unified_delay = %s\n", tomlStr(s.UnifiedDelay))
-	}
-	if s.KeepAliveInterval != "" && s.KeepAliveInterval != "sub" {
-		w("keep_alive_interval = %s\n", tomlStr(s.KeepAliveInterval))
-	}
+	w("log_level = %s\n", tomlStr(orDef(s.LogLevel, "info")))
+	w("tcp_concurrent = %s\n", tomlStr(orDef(s.TCPConcurrent, "true")))
+	w("unified_delay = %s\n", tomlStr(orDef(s.UnifiedDelay, "true")))
+	w("keep_alive_interval = %s\n", tomlStr(orDef(s.KeepAliveInterval, "30")))
 
 	w("\n[control-api]\n")
 	w("base = %s\n", tomlStr(s.Base))
@@ -545,15 +556,15 @@ func (s *Settings) Save() error {
 	w("resource_auto_update_enabled = %v\n", s.ResourceAutoUpdateEnabled)
 	w("resource_auto_update_interval = %s\n", tomlStr(s.ResourceAutoUpdateInterval.String()))
 	if !s.ResourceLastRun.IsZero() {
-		w("resource_last_run = %s\n", s.ResourceLastRun.Format("2006-01-02T15:04:05Z07:00"))
+		w("resource_auto_update_last_run = %s\n", s.ResourceLastRun.Format("2006-01-02T15:04:05Z07:00"))
 	}
 	if !s.AutoSelectLastRun.IsZero() {
-		w("auto_select_last_run = %s\n", s.AutoSelectLastRun.Format("2006-01-02T15:04:05Z07:00"))
+		w("node_auto_select_last_run = %s\n", s.AutoSelectLastRun.Format("2006-01-02T15:04:05Z07:00"))
 	}
 
 	w("\n[misc]\n")
-	w("test_url = %s\n", tomlStr(s.TestURL))
-	w("test_timeout_ms = %d\n", s.TestTimeout)
+	w("test_url = %s\n", tomlStr(orDef(s.TestURL, "https://www.gstatic.com/generate_204")))
+	w("test_timeout_ms = %d\n", orInt(s.TestTimeout, 5000))
 
 	if len(s.History) > 0 {
 		w("\n[[core-spec.history]]\n")
@@ -690,6 +701,55 @@ func validMirror(v string) bool {
 		return true
 	}
 	return strings.HasPrefix(v, "http://") || strings.HasPrefix(v, "https://")
+}
+
+// renameV15 v1.5.0 的键名/段落调整 (就地改 out):
+//   - core.dns_servers → overrides.dns.nameserver (它本来就是 dns 段的东西)
+//   - timer.auto_select_last_run → timer.node_auto_select_last_run
+//   - timer.resource_last_run     → timer.resource_auto_update_last_run
+func renameV15(out map[string]any) {
+	if core, ok := out["core"].(map[string]any); ok {
+		if ns, ok := core["dns_servers"]; ok {
+			delete(core, "dns_servers")
+			ov, _ := out["overrides"].(map[string]any)
+			if ov == nil {
+				ov = map[string]any{}
+				out["overrides"] = ov
+			}
+			dns, _ := ov["dns"].(map[string]any)
+			if dns == nil {
+				dns = map[string]any{}
+				ov["dns"] = dns
+			}
+			dns["nameserver"] = ns
+		}
+	}
+	if tm, ok := out["timer"].(map[string]any); ok {
+		for _, r := range [][2]string{
+			{"auto_select_last_run", "node_auto_select_last_run"},
+			{"resource_last_run", "resource_auto_update_last_run"},
+		} {
+			if v, ok := tm[r[0]]; ok {
+				delete(tm, r[0])
+				tm[r[1]] = v
+			}
+		}
+	}
+}
+
+// orDef 空值回退默认值 (Save 写托管键时用, 保证文件和 config get 完全一致)
+func orDef(v, def string) string {
+	if v == "" || v == "sub" {
+		return def
+	}
+	return v
+}
+
+func orInt(v, def int) int {
+	if v <= 0 {
+		return def
+	}
+	return v
 }
 
 func tomlStr(s string) string { return fmt.Sprintf("%q", s) }

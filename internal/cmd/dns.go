@@ -90,14 +90,14 @@ func resolveDNSServers(s *app.Settings, args []string) ([]string, error) {
 	return servers, nil
 }
 
-// dnsCmd 的裸命令 = config get dns (只打参数表; 预设表移到 config set dns.nameserver -h)
+// dnsCmd 的裸命令 = config get core.dns (只打参数表; 预设表移到 config set core.dns.nameserver -h)
 // 写操作全部走 config set; 这里只保留 on/off 两个最常用的糖。
 func init() {
 	for _, c := range []*cobra.Command{dnsOnCmd, dnsOffCmd} {
 		markMutating(c)
 	}
 	// 预设名 / subN 的解析与补全交给 cfg (dns.nameserver 的值域),
-	// 这样 config set dns.nameserver cloudflare 也能用, 且只有一处实现
+	// 这样 config set core.dns.nameserver cloudflare 也能用, 且只有一处实现
 	cfg.SetDNSPresetNames(dnsPresetNameList(), func(s *app.Settings, v string) ([]string, error) {
 		return resolveDNSServers(s, []string{v})
 	})

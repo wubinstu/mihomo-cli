@@ -23,7 +23,7 @@ var subCmd = &cobra.Command{
 
 func subListRun(cmd *cobra.Command, args []string) error {
 	s := mustSettings()
-	rows := [][]string{{"*", "#", T("名称"), T("节点数"), T("更新时间"), "QUOTA", "URL"}}
+	rows := [][]string{{"*", "#", T("名称"), T("节点数"), T("更新时间"), T("用量"), "URL"}}
 	for i := range s.Profiles {
 		p := &s.Profiles[i]
 		cur := ""
@@ -33,7 +33,7 @@ func subListRun(cmd *cobra.Command, args []string) error {
 		rows = append(rows, []string{
 			cur, strconv.Itoa(i + 1), p.Name, strconv.Itoa(p.Nodes),
 			humanTime(p.UpdatedAt),
-			shorten(p.UserInfo, 32), shorten(p.URL, 40),
+			ui.QuotaText(p.UserInfo), shorten(p.URL, 40),
 		})
 	}
 	ui.Table(os.Stdout, rows, 2)

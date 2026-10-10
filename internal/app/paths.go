@@ -109,3 +109,6 @@ func HardenPerms() {
 		return nil
 	})
 }
+
+// Version mihomo-cli 版本号 (唯一来源; 配置迁移的备份名要带它, 所以不能放 cmd 包)
+const Version = "1.5.0"

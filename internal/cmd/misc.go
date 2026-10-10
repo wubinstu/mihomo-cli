@@ -15,6 +15,7 @@ import (
 	"github.com/wubinstu/mihomo-cli/internal/app"
 	"github.com/wubinstu/mihomo-cli/internal/cfg"
 	"github.com/wubinstu/mihomo-cli/internal/core"
+	"github.com/wubinstu/mihomo-cli/internal/subs"
 	"github.com/wubinstu/mihomo-cli/internal/sysd"
 	"github.com/wubinstu/mihomo-cli/internal/ui"
 )
@@ -130,6 +131,25 @@ var doctorCmd = &cobra.Command{
 			live2 := portOpen(fmt.Sprintf("0.0.0.0:%d", port))
 			rows = append(rows, checkRow{live2, T("LAN"),
 				fmt.Sprintf("0.0.0.0:%d %s (LAN: http://%s:%d)", port, listenWord(live2), lanIP(), port)})
+		}
+
+		// 当前订阅的用量/到期 (1.5.0 用户要求: 带用量限制的订阅要在体检里给结论)
+		if p := s.Current(); p != nil {
+			if q := subs.ParseQuota(p.UserInfo); q != nil {
+				switch q.State() {
+				case "expired":
+					// Short() 自己就以"已过期 <日期>"结尾, 不再重复
+					rows = append(rows, checkRow{false, T("订阅用量"), q.Short()})
+				case "out":
+					rows = append(rows, checkRow{false, T("订阅用量"),
+						fmt.Sprintf("%s (%s)", q.Short(), T("用量已用尽"))})
+				case "low":
+					rows = append(rows, checkRow{false, T("订阅用量"),
+						fmt.Sprintf("%s (%s)", q.Short(), T("用量即将用尽 (>=80%)"))})
+				default:
+					rows = append(rows, checkRow{true, T("订阅用量"), q.Short()})
+				}
+			}
 		}
 
 		// 配置一致性 (config.toml ↔ 运行态)
@@ -316,7 +336,8 @@ func lanIP() string {
 
 // ---- version ----
 
-var Version = "1.4.2"
+// Version 见 app.Version (配置迁移的备份名要带版本号)
+var Version = app.Version
 
 var versionCmd = &cobra.Command{
 	Use:   "version",

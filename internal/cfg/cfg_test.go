@@ -36,7 +36,7 @@ func TestKeysUniqueAndComplete(t *testing.T) {
 	if Lookup("core.mixed-port") == nil {
 		t.Fatal("core.mixed-port must be registered")
 	}
-	if Lookup("tun.enable") == nil || Lookup("dns.enable") == nil || Lookup("cli.language") == nil || Lookup("timer.sub-auto-update-enabled") == nil {
+	if Lookup("core.tun.enable") == nil || Lookup("core.dns.enable") == nil || Lookup("cli.language") == nil || Lookup("timer.sub-auto-update-enabled") == nil {
 		t.Fatal("dotted keys must be registered")
 	}
 }
@@ -153,7 +153,7 @@ func samePortText(a, b string) bool {
 // 三态键: "sub" = 删除该键 (不注入 yaml), 具体值 = 写入
 func TestSectionSetAndDelete(t *testing.T) {
 	s := &app.Settings{Overrides: map[string]any{}}
-	k := Lookup("tun.stack")
+	k := Lookup("core.tun.stack")
 	if err := k.Set(s, "gvisor"); err != nil {
 		t.Fatal(err)
 	}
@@ -172,27 +172,39 @@ func TestSectionSetAndDelete(t *testing.T) {
 }
 
 // dns.enable / dns.nameserver 挂到 DNSServers 字段, 与 dns use 语义一致
-func TestDNSEnableUsesDNSServers(t *testing.T) {
+// dns/tun 段的所有键共用一个存储 ([overrides.<段>]), 不再有 DNSServers 这种特权字段
+func TestDNSSectionSharesOneStore(t *testing.T) {
 	s := &app.Settings{}
-	ns := Lookup("dns.nameserver")
+	ns := Lookup("core.dns.nameserver")
 	if err := ns.Set(s, "223.5.5.5,119.29.29.29"); err != nil {
 		t.Fatal(err)
 	}
-	en := Lookup("dns.enable")
+	en := Lookup("core.dns.enable")
 	if en.Get(s) != "true" {
-		t.Fatalf("dns.enable = %q, want true", en.Get(s))
+		t.Fatalf("core.dns.enable = %q, want true (nameserver set implies the section is on)", en.Get(s))
+	}
+	if !SecHas(s, "core.dns.nameserver") {
+		t.Error("nameserver must land in the same store as the rest of the dns section")
 	}
 	if err := en.Set(s, "false"); err != nil {
 		t.Fatal(err)
 	}
-	if len(s.DNSServers) != 0 {
-		t.Fatalf("dns off should clear DNSServers, got %v", s.DNSServers)
+	// 显式关掉: 盖住已设的 nameserver, 整段不注入
+	if en.Get(s) != "false" || DNSSectionActive(s) {
+		t.Errorf("after dns off: enable=%q active=%v, want false/false", en.Get(s), DNSSectionActive(s))
 	}
 	if err := ns.Set(s, "sub"); err != nil {
 		t.Fatal(err)
 	}
 	if ns.Get(s) != "sub" {
-		t.Fatalf("dns.nameserver = %q, want sub", ns.Get(s))
+		t.Fatalf("core.dns.nameserver = %q, want sub", ns.Get(s))
+	}
+	// 重新打开又能用
+	if err := en.Set(s, "true"); err != nil {
+		t.Fatal(err)
+	}
+	if !DNSSectionActive(s) {
+		t.Error("dns on must reactivate the section")
 	}
 }
 
@@ -246,10 +258,10 @@ func TestPortDefaults(t *testing.T) {
 	}
 }
 
-// 段排序: core → cli → timer → dns → tun
+// 段排序: core → cli → timer → core.dns → core.tun (段名 = CLI 键前缀)
 func TestSectionOrder(t *testing.T) {
 	got := Sections()
-	want := []string{"core", "cli", "timer", "dns", "tun"}
+	want := []string{"core", "cli", "timer", "core.dns", "core.tun"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("sections = %v, want %v", got, want)
 	}
@@ -261,17 +273,17 @@ func TestCompleteKeysTwoLevels(t *testing.T) {
 	if len(all) == 0 {
 		t.Fatal("no key completions")
 	}
-	dns := CompleteKeys("dns.")
+	dns := CompleteKeys("core.dns.")
 	found := false
 	for _, k := range dns {
-		if k == "dns.enable" {
+		if k == "core.dns.enable" {
 			found = true
 		}
 	}
 	if !found {
 		t.Fatalf("dns. completion = %v", dns)
 	}
-	tun := CompleteKeys("tun.")
+	tun := CompleteKeys("core.tun.")
 	if len(tun) == 0 {
 		t.Fatal("tun. completion empty")
 	}
@@ -326,16 +338,17 @@ func hasCJK(s string) bool {
 // YAMLPath: core 段去前缀 + 内核里的异名键; dns/tun 原样嵌套
 func TestYAMLPath(t *testing.T) {
 	cases := map[string]string{
-		"core.proxy-mode":           "mode",
-		"core.ipv6-enabled":         "ipv6",
-		"core.http-port":            "port",
-		"core.mixed-port":           "mixed-port",
-		"core.allow-lan":            "allow-lan",
-		"core.keep-alive-interval":  "keep-alive-interval",
-		"dns.enable":                "dns.enable",
-		"dns.fake-ip-range":         "dns.fake-ip-range",
-		"tun.stack":                 "tun.stack",
-		"tun.route-exclude-address": "tun.route-exclude-address",
+		"core.proxy-mode":          "mode",
+		"core.ipv6-enabled":        "ipv6",
+		"core.http-port":           "port",
+		"core.mixed-port":          "mixed-port",
+		"core.allow-lan":           "allow-lan",
+		"core.keep-alive-interval": "keep-alive-interval",
+		// core. 是 CLI 侧的前缀, 内核 yaml 里没有这一层
+		"core.dns.enable":                "dns.enable",
+		"core.dns.fake-ip-range":         "dns.fake-ip-range",
+		"core.tun.stack":                 "tun.stack",
+		"core.tun.route-exclude-address": "tun.route-exclude-address",
 	}
 	for in, want := range cases {
 		if got := YAMLPath(in); got != want {

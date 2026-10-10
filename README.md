@@ -11,10 +11,12 @@
 /etc/systemd/system/          mihomo-core.service (journal 日志) + 三个 timer (sub/node/resource)
 ```
 
-`config.toml` 按段写成 TOML 表，段落名和命令的 `<段>.<键>` 一一对应：
+`config.toml` 按段写成 TOML 表。**`core.` 前缀 = 内核 config.yaml**：`core.<段>.<键>` 就是
+yaml 里的 `<段>.<键>`（`core.dns.enable` ↔ `dns.enable`，`core.tun.stack` ↔ `tun.stack`），
+内核的配置段统一放 `[overrides.<段名>]`，段名和 yaml 一致：
 
 ```toml
-[cli]                                  # cli.*
+[cli]                                  # cli.*      —— CLI 自身
 language = "zh"
 current_profile = "EDT"
 
@@ -23,12 +25,12 @@ platform = "linux/amd64"
 flavor = "v3"
 version = "v1.19.31"
 
-[core]                                 # core.* → 内核 config.yaml
-allow_lan = false
+[core]                                 # core.* → 内核 config.yaml 的顶层键
+allow_lan = false                      # 托管键一律写有效值, 和 config get 完全一致
 mixed_port = "7890"
 socks_port = "off"
 
-[control-api]                          # external-controller
+[control-api]                          # external-controller (CLI 自己的管道)
 base = "http://127.0.0.1:9090"
 
 [timer]                                # timer.* → systemd
@@ -37,8 +39,9 @@ sub_auto_update_interval = "24h0m0s"
 [misc]
 test_url = "https://www.gstatic.com/generate_204"
 
-[overrides.dns]                        # dns.* → 内核的 dns 段 (用过才写)
+[overrides.dns]                        # core.dns.* → 内核的 dns 段 (设过才写)
 enable = true
+nameserver = ["1.1.1.1", "1.0.0.1"]
 
 [[user_rules]]                         # rule 命令的结构化存储
 type = "DOMAIN"
@@ -92,8 +95,8 @@ group  use|unuse [list]                          分组 (#1..#n)
 node   use|unuse|test|auto [list]                节点 (地区列/彩色测速/择优)  [-g 分组]
 proxy  on/off                                    当前 shell 开关代理 (alias)
 rule   list/add/enable/disable/rm                用户规则 (结构化, 优先于订阅, 内核校验回滚)
-dns    on/off/use/unuse/list                     DNS (预设 + subN + 自定义 IP; 点号路径可配全段)
-tun    on/off/list                               TUN 透明代理 (带安全护栏)
+dns    on/off/list                              DNS 覆写开关 (其余参数走 config set core.dns.*)
+tun    on/off/list                               TUN 透明代理 (带安全护栏; 其余参数走 config set core.tun.*)
 top    [watch N] [kill <id..>]                   流量/速度/连接总览 (PID 式编号)
 ping   [站点...]                                 站点延迟/受限检测 (启发式)
 config get|set|reset-default|unset|              配置管理: 一张表显示 默认值/设置值/运行值/状态
@@ -102,7 +105,7 @@ resource core version|upgrade|rollback|history   内核版本与本地版本栈
          mmdb|asn|geoip|geosite info|update      geo 数据资源
          update-all
 log [-f]                                         日志 (journalctl)
-doctor / version / completion                    体检/版本/补全
+doctor / version                                   体检/版本
 ```
 
 全部输出双语：`config set cli.language auto|zh|en`（默认按 locale 回退中文）。
@@ -155,8 +158,9 @@ timer.resource-auto-update-interval 24h   24h     24h      ✔
 - `SETTING` 为 `-` 表示**未接管**：不写进内核 yaml，订阅/内核原样保留
 - 只对接管过的键取运行态，所以不会拿订阅/内核的默认值来刷假差异
 - `config set <key> <value>`：写入 config.toml 并立刻让运行态跟上；点号后按 TAB 可继续补全
-- `dns`/`tun` 段默认**不露面**, 只看总开关 (`dns.enable`/`tun.enable`): 开关没开时,
-  这段配置根本不参与渲染, 摆出来只会误导。设了值但没开会给一行提示, `config get dns` 永远能看。
+- `core.dns`/`core.tun` 段默认**不露面**, 只看总开关 (`core.dns.enable`/`core.tun.enable`):
+  开关没开时这段配置根本不参与渲染, 摆出来只会误导。设了值但没开会给一行提示,
+  `config get core.dns` 永远能看。
 - **帮助分两级**：`config set -h` 给全部键的一行简介；`config set <key> -h` 给该键的详细介绍
   （说明 / 每个取值的含义 / 默认值 / 生效方式 / 用法）（`proxy-mode`/`log-level` 走 PATCH 热切换；
   端口等需要重建监听的先试热重载，失败才重启；timer 键重写 unit 并启停）
@@ -296,7 +300,7 @@ CLI 内下载内核/geo/自更新走 镜像自动尝试链，可用 `config set 
 ## 自检
 
 ```bash
-scripts/completion-check.sh      # 57 项补全断言 (禁止文件补全 + 每个键都有值补全)
+scripts/completion-check.sh      # 67 项补全断言 (禁止文件补全 + 每个键都有值补全)
 go test ./...                    # 单元测试 + i18n 静态审计 (en 模式零中文)
 ```
 

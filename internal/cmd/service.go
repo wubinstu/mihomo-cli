@@ -8,7 +8,9 @@ import (
 
 	"github.com/wubinstu/mihomo-cli/internal/api"
 	"github.com/wubinstu/mihomo-cli/internal/app"
+	"github.com/wubinstu/mihomo-cli/internal/cfg"
 	"github.com/wubinstu/mihomo-cli/internal/render"
+	"github.com/wubinstu/mihomo-cli/internal/subs"
 	"github.com/wubinstu/mihomo-cli/internal/sysd"
 	"github.com/wubinstu/mihomo-cli/internal/ui"
 	"time"
@@ -79,15 +81,15 @@ var statusCmd = &cobra.Command{
 		} else {
 			rows = append(rows, checkRow{true, T("LAN"), T("仅本机 (127.0.0.1)")})
 		}
-		if len(s.DNSServers) == 0 {
+		if ns := cfg.SecList(s, "core.dns.nameserver"); len(ns) == 0 {
 			rows = append(rows, checkRow{true, T("DNS"), T("跟随订阅")})
 		} else {
-			rows = append(rows, checkRow{true, T("DNS"), strings.Join(s.DNSServers, ", ")})
+			rows = append(rows, checkRow{true, T("DNS"), strings.Join(ns, ", ")})
 		}
-		if k := cfgLookup("dns.enable"); k != nil && k.Get(s) == "true" {
+		if k := cfgLookup("core.dns.enable"); k != nil && k.Get(s) == "true" {
 			rows = append(rows, checkRow{true, T("DNS override"), T("已开启")})
 		}
-		if k := cfgLookup("tun.enable"); k != nil && k.Get(s) == "true" {
+		if k := cfgLookup("core.tun.enable"); k != nil && k.Get(s) == "true" {
 			rows = append(rows, checkRow{true, T("TUN"), T("已开启")})
 		}
 
@@ -102,6 +104,10 @@ var statusCmd = &cobra.Command{
 			rows = append(rows, checkRow{true, T("Profile"),
 				fmt.Sprintf("sub%d:%s (%d %s, %s)", subIndex(s, p.Name), p.Name, p.Nodes, T("节点"),
 					humanTime(p.UpdatedAt))})
+			// 当前订阅带用量限制时直接给结论 (用户 1.5.0 要求)
+			if q := subs.ParseQuota(p.UserInfo); q != nil {
+				rows = append(rows, checkRow{true, T("订阅用量"), q.Short()})
+			}
 			if s.CurrentGroup != "" && active {
 				if ps, err := c.Proxies(); err == nil {
 					if g := resolveGroupArg(ps, s.CurrentGroup); g != nil {

@@ -63,8 +63,8 @@ func Fetch(s *app.Settings) *Live {
 func keyManaged(s *app.Settings, k Key) bool {
 	if k.Section == "dns" {
 		switch k.Name {
-		case "dns.enable", "dns.nameserver":
-			return len(s.DNSServers) > 0 || SecHas(s, "dns.enable") || SecHas(s, "dns.nameserver")
+		case "core.dns.enable", "core.dns.nameserver":
+			return SecHas(s, "core.dns.enable") || SecHas(s, "core.dns.nameserver")
 		}
 	}
 	return SecHas(s, k.Name)

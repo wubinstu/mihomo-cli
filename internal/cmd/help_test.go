@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -231,31 +232,31 @@ func TestSectionVisibilityFollowsEnable(t *testing.T) {
 		t.Errorf("nothing configured: shown sections = %v, want none", got)
 	}
 	// 只设一个无关键: 段仍然不露面
-	if err := cfg.SetGeneric(s, "dns.ipv6", "false"); err != nil {
+	if err := cfg.SetGeneric(s, "core.dns.ipv6", "false"); err != nil {
 		t.Fatal(err)
 	}
 	if got := cfg.ShownSections(s); len(got) != 0 {
 		t.Errorf("dns.ipv6 set but dns.enable off: shown = %v, want none", got)
 	}
-	if got := cfg.HiddenSections(s); len(got) != 1 || got[0] != "dns" {
-		t.Errorf("hidden = %v, want [dns]", got)
+	if got := cfg.HiddenSections(s); len(got) != 1 || got[0] != "core.dns" {
+		t.Errorf("hidden = %v, want [core.dns]", got)
 	}
 	// 打开总开关才露面
-	k := cfg.Lookup("dns.enable")
+	k := cfg.Lookup("core.dns.enable")
 	if k == nil {
 		t.Fatal("dns.enable not registered")
 	}
 	if err := k.Set(s, "true"); err != nil {
 		t.Fatal(err)
 	}
-	if got := cfg.ShownSections(s); len(got) != 1 || got[0] != "dns" {
-		t.Errorf("dns.enable on: shown = %v, want [dns]", got)
+	if got := cfg.ShownSections(s); len(got) != 1 || got[0] != "core.dns" {
+		t.Errorf("dns.enable on: shown = %v, want [core.dns]", got)
 	}
 }
 
 // TestTunStackKnowsMips 内核 v1.19 新增 mips 协议栈, 值域和默认值必须跟上
 func TestTunStackKnowsMips(t *testing.T) {
-	k := cfg.Lookup("tun.stack")
+	k := cfg.Lookup("core.tun.stack")
 	if k == nil {
 		t.Fatal("tun.stack not registered")
 	}
@@ -270,7 +271,7 @@ func TestTunStackKnowsMips(t *testing.T) {
 // TestEnumRunningValueCaseInsensitive 内核回显大小写不统一 (Mips/Mixed/gVisor),
 // RUNNING 列必须归一到我们的拼法, 否则和 SETTING 对不上
 func TestEnumRunningValueCaseInsensitive(t *testing.T) {
-	k := cfg.Lookup("tun.stack")
+	k := cfg.Lookup("core.tun.stack")
 	if k == nil {
 		t.Fatal("tun.stack not registered")
 	}
@@ -288,4 +289,90 @@ func containsStr(list []string, s string) bool {
 		}
 	}
 	return false
+}
+
+// sandbox 把 app 的全部路径指到临时目录 (测试不碰 /etc/mihomo-cli)
+func sandbox(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	app.BaseDir = dir
+	app.BinDir = filepath.Join(dir, "bin")
+	app.ProfileDir = filepath.Join(dir, "profiles")
+	app.RuntimeDir = filepath.Join(dir, "runtime")
+	app.VersionsDir = filepath.Join(dir, "bin", "versions")
+	app.LogDir = filepath.Join(dir, "logs")
+	app.CoreBin = filepath.Join(app.BinDir, "mihomo")
+	app.CoreBinOld = filepath.Join(app.BinDir, "mihomo.old")
+	app.SettingsFile = filepath.Join(dir, "config.toml")
+	app.OverridesFile = filepath.Join(dir, "overrides.yaml")
+	app.RuntimeConfig = filepath.Join(app.RuntimeDir, "config.yaml")
+	app.LogFile = filepath.Join(app.LogDir, "mihomo.log")
+	if err := os.MkdirAll(app.ProfileDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+// TestConfigFileMatchesConfigGet 托管键在 config.toml 里必须写**有效值**。
+// v1.5.0 用户反馈: 文件里 log_level = "" 而 config get 显示 info, 两边对不上。
+// 规则: core/cli/timer 的键一律落有效值; core.dns/core.tun 只在设过时才出现 (未托管)。
+func TestConfigFileMatchesConfigGet(t *testing.T) {
+	sandbox(t)
+	s := app.DefaultSettings()
+	if err := s.Save(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(app.SettingsFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(data, []byte(`log_level = ""`)) {
+		t.Error("log_level must be written as its effective value, not an empty string")
+	}
+	back, err := app.LoadSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range cfg.Keys {
+		if !k.Managed() {
+			continue
+		}
+		want := k.Effective(s)
+		got := k.Get(back)
+		if got == "" && want != "" {
+			continue // 空值键 (如 current-profile) 不落盘
+		}
+		if got != want {
+			t.Errorf("%s: file has %q, config get shows %q", k.Name, got, want)
+		}
+	}
+}
+
+// TestCorePrefixMirrorsYAML core.<段>.<键> 必须和内核 yaml 的路径一致 (v1.5.0 统一命名)。
+// 例外只有三个"为了好记起的名", 内核原名都太含糊 (port/mode/ipv6):
+var yamlAliases = map[string]string{
+	"core.http-port":    "port",
+	"core.proxy-mode":   "mode",
+	"core.ipv6-enabled": "ipv6",
+}
+
+func TestCorePrefixMirrorsYAML(t *testing.T) {
+	for _, k := range cfg.Keys {
+		if !strings.HasPrefix(k.Name, "core.") {
+			continue
+		}
+		want := strings.TrimPrefix(k.Name, "core.")
+		if a, ok := yamlAliases[k.Name]; ok {
+			want = a
+		}
+		if got := cfg.YAMLPath(k.Name); got != want {
+			t.Errorf("%s → yaml %q, want %q", k.Name, got, want)
+		}
+	}
+	// dns/tun 的段名就是 yaml 段名, 不该再出现裸 dns.*/tun.* 键
+	for _, k := range cfg.Keys {
+		if strings.HasPrefix(k.Name, "dns.") || strings.HasPrefix(k.Name, "tun.") {
+			t.Errorf("key %q must carry the core. prefix", k.Name)
+		}
+	}
 }

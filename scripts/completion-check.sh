@@ -44,14 +44,15 @@ check ""
 # --- 两层 key 补全 (含"点号后带空格"的半截路径) ---
 check "config" "set" ""
 expect "core.allow-lan"   "config" "set" ""
-expect "dns.enable"        "config" "set" "dns."
-expect "tun.stack"         "config" "set" "tun."
+expect "core.dns.enable"   "config" "set" "core.dns."
+expect "core.tun.stack"    "config" "set" "core.tun."
 expect "cli.language"      "config" "set" "cli."
 expect "timer.sub-auto-update-enabled" "config" "set" "timer."
 # --- 每个 key 的值补全都必须有候选 ---
 for k in core.allow-lan core.mixed-port core.socks-port core.http-port core.proxy-mode \
          core.ipv6-enabled core.log-level core.tcp-concurrent core.unified-delay \
-         core.keep-alive-interval cli.language cli.github-mirror cli.test-url cli.test-timeout \
+         core.keep-alive-interval cli.language cli.github-mirror cli.test-url cli.test-timeout-ms \
+         core.dns.enable core.dns.nameserver core.tun.enable core.tun.stack \
          timer.sub-auto-update-enabled timer.sub-auto-update-interval \
          timer.node-auto-select-enabled timer.node-auto-select-interval \
          timer.resource-auto-update-enabled timer.resource-auto-update-interval; do
@@ -60,7 +61,7 @@ done
 # --- 点号后带空格也要能补出键名 (v1.4 修过的分支) ---
 expect "core.allow-lan" "config" "set" "core." ""
 expect "cli.language"    "config" "set" "cli." ""
-expect "tun.enable"      "config" "set" "tun." ""
+expect "core.tun.enable"  "config" "set" "core.tun." ""
 expect "core.allow-lan" "config" "get" "core." ""
 expect "core.allow-lan" "config" "unset" "core." ""
 

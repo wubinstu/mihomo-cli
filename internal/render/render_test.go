@@ -158,10 +158,10 @@ func TestGenerateDottedSectionsOnlyWhenUsed(t *testing.T) {
 	if _, ok := read(t)["tun"]; ok {
 		t.Error("tun must be absent when unused")
 	}
-	if err := cfg.SetGeneric(s, "tun.enable", "true"); err != nil {
+	if err := cfg.SetGeneric(s, "core.tun.enable", "true"); err != nil {
 		t.Fatal(err)
 	}
-	if err := cfg.SetGeneric(s, "tun.mtu", "1500"); err != nil {
+	if err := cfg.SetGeneric(s, "core.tun.mtu", "1500"); err != nil {
 		t.Fatal(err)
 	}
 	if err := Generate(s); err != nil {

@@ -37,13 +37,15 @@ func TestSettingsRoundTrip(t *testing.T) {
 	s.SocksPort = "7891"
 	s.HTTPPort = "7892"
 	s.IPV6Enabled = true
-	s.DNSServers = []string{"https://a/dns-query", "https://b/dns-query"}
 	s.TCPConcurrent = "true"
 	s.Platform = "linux/amd64"
 	s.Flavor = "v3"
 	s.Version = "v1.19.31"
 	s.History = []CoreVer{{Version: "v1.19.30", Flavor: "v3", Platform: "linux/amd64", InstalledAt: time.Now()}}
-	s.Overrides = map[string]any{"dns": map[string]any{"enable": true}}
+	s.Overrides = map[string]any{"dns": map[string]any{
+		"nameserver": []any{"https://a/dns-query", "https://b/dns-query"},
+		"enable":     true,
+	}}
 	s.UserRules = []UserRule{{Type: "DOMAIN", Condition: "x.com", Strategy: "DIRECT", Enabled: true}}
 	s.Profiles = []Profile{{Name: "EDT", URL: "https://x/sub", Nodes: 16}}
 	if err := s.Save(); err != nil {
@@ -59,8 +61,12 @@ func TestSettingsRoundTrip(t *testing.T) {
 	if !back.AllowLan || back.MixedPort != "7890" || back.SocksPort != "7891" || back.HTTPPort != "7892" || !back.IPV6Enabled {
 		t.Errorf("core section lost: %+v", back.Core)
 	}
-	if len(back.DNSServers) != 2 || back.TCPConcurrent != "true" {
-		t.Errorf("core lists lost: %v %q", back.DNSServers, back.TCPConcurrent)
+	if back.TCPConcurrent != "true" {
+		t.Errorf("core tri-state lost: %q", back.TCPConcurrent)
+	}
+	ns, _ := back.Overrides["dns"].(map[string]any)["nameserver"].([]any)
+	if len(ns) != 2 || ns[0] != "https://a/dns-query" {
+		t.Errorf("dns nameserver lost: %#v", back.Overrides)
 	}
 	if back.Platform != "linux/amd64" || back.Flavor != "v3" || back.Version != "v1.19.31" || len(back.History) != 1 {
 		t.Errorf("core-spec lost: %+v %+v", back.CoreSpec, back.History)
@@ -162,14 +168,16 @@ nodes = 16
 			t.Errorf("%s = %#v, want %#v", c.name, c.got, c.want)
 		}
 	}
-	if len(s.DNSServers) != 1 || s.DNSServers[0] != "https://a/dns-query" {
-		t.Errorf("dns_servers lost: %v", s.DNSServers)
+	// dns_servers 已从 [core] 挪到 [overrides.dns] nameserver (v1.5.0)
+	ns, _ := s.Overrides["dns"].(map[string]any)["nameserver"].([]any)
+	if len(ns) != 1 || ns[0] != "https://a/dns-query" {
+		t.Errorf("dns_servers lost: %#v", s.Overrides)
 	}
 	if len(s.UserRules) != 1 || len(s.Profiles) != 1 {
 		t.Errorf("tables lost: %d %d", len(s.UserRules), len(s.Profiles))
 	}
 	// 迁移要留备份, 并把文件重排成新格式
-	if _, err := os.Stat(SettingsFile + ".pre-1.5.bak"); err != nil {
+	if _, err := os.Stat(SettingsFile + ".pre-" + Version + ".bak"); err != nil {
 		t.Error("legacy config should be backed up")
 	}
 	data, _ := os.ReadFile(SettingsFile)

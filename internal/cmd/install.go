@@ -203,7 +203,7 @@ func archText(arch string) string {
 
 // tunOn config.toml 里是否开了 TUN
 func tunOn(s *app.Settings) bool {
-	if k := cfgLookup("tun.enable"); k != nil {
+	if k := cfgLookup("core.tun.enable"); k != nil {
 		return k.Get(s) == "true"
 	}
 	return false

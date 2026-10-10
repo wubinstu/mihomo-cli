@@ -14,7 +14,7 @@ import (
 	"github.com/wubinstu/mihomo-cli/internal/ui"
 )
 
-// tunCmd / dnsCmd 是 config set tun.* / config set dns.* 的极薄糖命令:
+// tunCmd / dnsCmd 是 config set core.tun.* / config set core.dns.* 的极薄糖命令:
 // 只保留 on/off/list 三个动作, 其余参数一律走 config set。
 var tunCmd = &cobra.Command{
 	Use:   "tun",
@@ -22,10 +22,10 @@ var tunCmd = &cobra.Command{
 	Long: T("TUN 会让默认流量进入虚拟网卡, 配置错误可能把自己踢出服务器;") + "\n" +
 		T("开启前会自动做安全检查 (TUN 设备 / CAP_NET_ADMIN / SSH 对端网段排除)。") + "\n\n" +
 		ui.ExampleLines([][2]string{
-			{"mihomo-cli tun on", T("等价于 config set tun.enable true")},
-			{"mihomo-cli tun off", T("等价于 config set tun.enable false")},
-			{"mihomo-cli tun", T("查看 tun 段全部配置项 (等于 config get tun)")},
-			{"mihomo-cli config set tun.stack mixed", T("TUN 的其它参数都走 config set")},
+			{"mihomo-cli tun on", T("等价于") + " config set core.tun.enable true"},
+			{"mihomo-cli tun off", T("等价于") + " config set core.tun.enable false"},
+			{"mihomo-cli tun", T("查看 tun 段全部配置项 (等于 config get core.tun)")},
+			{"mihomo-cli config set core.tun.stack mixed", T("TUN 的其它参数都走 config set")},
 		}, 2),
 	RunE: func(cmd *cobra.Command, args []string) error { return tunList() },
 }
@@ -46,14 +46,14 @@ var dnsCmd = &cobra.Command{
 	Use:   "dns",
 	Short: T("DNS 覆写: on/off/list"),
 	Long: T("自定义 DNS 会覆盖订阅中的 dns 配置; off 恢复跟随订阅。") + "\n" +
-		T("裸命令等于 config get dns, 只显示参数表 (预设表见 config set dns.nameserver -h);") + "\n" +
+		T("裸命令等于 config get core.dns, 只显示参数表;") + "\n" +
 		T("写操作统一走 config set, 这里只留 on/off 两个糖:") + "\n" +
 		ui.ExampleLines([][2]string{
-			{"mihomo-cli dns on", T("开启 DNS 覆写 (等于 config set dns.enable true)")},
+			{"mihomo-cli dns on", T("开启 DNS 覆写") + " (" + T("等价于") + " config set core.dns.enable true)"},
 			{"mihomo-cli dns off", T("关闭 DNS 覆写, 恢复跟随订阅")},
-			{"mihomo-cli config set dns.nameserver cloudflare", T("设 DNS 服务器 (预设名, TAB 可补全)")},
-			{"mihomo-cli config set dns.nameserver 223.5.5.5,119.29.29.29", T("自定义 IP")},
-			{"mihomo-cli config set dns.nameserver sub", T("恢复跟随订阅")},
+			{"mihomo-cli config set core.dns.nameserver cloudflare", T("设 DNS 服务器 (预设名, TAB 可补全)")},
+			{"mihomo-cli config set core.dns.nameserver 223.5.5.5,119.29.29.29", T("自定义 IP")},
+			{"mihomo-cli config set core.dns.nameserver sub", T("恢复跟随订阅")},
 		}, 2),
 	RunE: func(cmd *cobra.Command, args []string) error { return dnsList() },
 }
@@ -81,7 +81,7 @@ func tunList() error {
 
 func tunSet(on bool) error {
 	s := mustSettings()
-	k := cfg.Lookup("tun.enable")
+	k := cfg.Lookup("core.tun.enable")
 	if k == nil {
 		return fmt.Errorf("%s", T("内部错误: tun.enable 未注册"))
 	}
@@ -100,7 +100,7 @@ func tunSet(on bool) error {
 	if err := s.Save(); err != nil {
 		return err
 	}
-	fmt.Printf("tun.enable = %s %s\n", canon, T("已保存"))
+	fmt.Printf("core.tun.enable = %s %s\n", canon, T("已保存"))
 	return applyConfig(s, k)
 }
 
@@ -121,7 +121,7 @@ func ensureTunReady(s *app.Settings, k *cfg.Key) error {
 		return fmt.Errorf("%s: %s\n  %s\n  %s",
 			T("无法开启 TUN"),
 			T("当前 SSH 会话的对端网段未在 tun.route-exclude-address 中, 开启后极可能被自己踢下线"),
-			T("请先执行: mihomo-cli config set tun.route-exclude-address "+sshPeerCIDR(sshPeerIP())+",192.168.0.0/16,10.0.0.0/8"),
+			T("请先执行: mihomo-cli config set core.tun.route-exclude-address "+sshPeerCIDR(sshPeerIP())+",192.168.0.0/16,10.0.0.0/8"),
 			T("确认无误后可再次执行 mihomo-cli tun on"))
 	}
 	return nil
@@ -146,7 +146,7 @@ func sshSafe(s *app.Settings) bool {
 
 // curExclude 当前 tun.route-exclude-address 的值
 func curExclude(s *app.Settings) string {
-	if k := cfg.Lookup("tun.route-exclude-address"); k != nil {
+	if k := cfg.Lookup("core.tun.route-exclude-address"); k != nil {
 		return k.Get(s)
 	}
 	return ""
@@ -194,14 +194,14 @@ func dnsList() error {
 	s := mustSettings()
 	live := cfg.Fetch(s)
 	printConfigSections(s, live, []string{"dns"})
-	// 预设表只在 config set dns.nameserver -h 里给, 不在这里刷屏
-	fmt.Println(T("用法: mihomo-cli config set dns.nameserver <预设名|subN|ip...> | mihomo-cli dns off"))
-	fmt.Println(T("预设名列表: mihomo-cli config set dns.nameserver -h"))
+	// 预设表只在 config set core.dns.nameserver -h 里给, 不在这里刷屏
+	fmt.Println(T("用法: mihomo-cli config set core.dns.nameserver <预设名|subN|ip...> | mihomo-cli dns off"))
+	fmt.Println(T("预设名列表: mihomo-cli config set core.dns.nameserver -h"))
 	return nil
 }
 
 func dnsSet(on bool) error {
-	return configSet(mustSettings(), "dns.enable", boolWord(on))
+	return configSet(mustSettings(), "core.dns.enable", boolWord(on))
 }
 
 func boolWord(on bool) string {

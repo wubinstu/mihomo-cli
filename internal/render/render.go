@@ -90,9 +90,10 @@ func Generate(s *app.Settings) error {
 	}
 
 	// 点号路径写入的配置段: 深合并进订阅 (只用过的段才出现, 未用过的完全不碰订阅)
-	for _, sec := range []string{"dns", "tun"} {
+	for _, sec := range []string{"core.dns", "core.tun"} {
 		if m := cfg.OverrideSection(s, sec); m != nil {
-			DeepMerge(cfgMap, map[string]any{sec: m})
+			// 段名带 core. 前缀是 CLI 侧的叫法, 内核 yaml 里就是裸段名
+			DeepMerge(cfgMap, map[string]any{cfg.SecStoreName(sec): m})
 		}
 	}
 
@@ -158,7 +159,7 @@ func Generate(s *app.Settings) error {
 		cfgMap["rules"] = merged
 	}
 	// 自定义 DNS: 覆盖 nameserver; default-nameserver 必须为纯 IP (内核要求), DoH 时用内置 IP
-	if len(s.DNSServers) > 0 || dnsSectionActive(s) {
+	if cfg.DNSSectionActive(s) {
 		injectDNS(cfgMap, s)
 	}
 
@@ -169,16 +170,6 @@ func Generate(s *app.Settings) error {
 	return os.WriteFile(app.RuntimeConfig, out, 0o640)
 }
 
-// dnsSectionActive dns 段是否被显式开启 (config set dns.enable true)
-func dnsSectionActive(s *app.Settings) bool {
-	m := cfg.OverrideSection(s, "dns")
-	if m == nil {
-		return false
-	}
-	on, _ := m["enable"].(bool)
-	return on
-}
-
 // injectDNS 组装 dns 段: 顶层键由注册表提供, cli 侧的 nameserver 优先
 func injectDNS(cfgMap map[string]any, s *app.Settings) {
 	dns, _ := cfgMap["dns"].(map[string]any)
@@ -186,12 +177,12 @@ func injectDNS(cfgMap map[string]any, s *app.Settings) {
 		dns = map[string]any{}
 	}
 	dns["enable"] = true
-	if len(s.DNSServers) > 0 {
-		dns["nameserver"] = toAnyList(s.DNSServers)
+	if ns := cfg.SecList(s, "core.dns.nameserver"); len(ns) > 0 {
+		dns["nameserver"] = toAnyList(ns)
 	}
 	// default-nameserver 必须纯 IP: 自定义 nameserver 全是 DoH/DoT 时用内置 IP
 	if _, ok := dns["default-nameserver"]; !ok {
-		ns := s.DNSServers
+		ns := cfg.SecList(s, "core.dns.nameserver")
 		hasIP := false
 		for _, n := range ns {
 			if net.ParseIP(strings.Split(strings.Split(n, "//")[len(strings.Split(n, "//"))-1], ":")[0]) != nil && !strings.Contains(n, "://") {

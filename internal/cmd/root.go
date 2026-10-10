@@ -91,9 +91,14 @@ func Execute() {
 	applyLanguage(rootCmd)
 	// 所有子命令禁用文件路径补全 (mihomo-cli 不与文件打交道; root 自身也要挂)
 	disableFileComp(rootCmd)
-	// cobra 内置命令(help/completion)文案本地化 (需先触发默认命令创建)
+	// cobra 的 ExecuteC 会无条件调用 InitDefaultCompletionCmd(); 唯一的抑制办法是
+	// 抢先注册一个同名命令 (它见到已有 completion 就直接返回)。
+	// `mihomo-cli completion` 和 `mihomo-cli install --completion` 功能完全重合
+	// (都是往系统目录写补全脚本), 留一个入口就够 (v1.5.0 用户反馈)。
+	rootCmd.CompletionOptions.DisableDefaultCmd = true
+	rootCmd.CompletionOptions.DisableDescriptions = true
+	rootCmd.CompletionOptions.HiddenDefaultCmd = true
 	rootCmd.InitDefaultHelpCmd()
-	rootCmd.InitDefaultCompletionCmd()
 	localizeBuiltins(rootCmd)
 	// cobra 写死的帮助骨架 ("Usage:"/"Available Commands:"/"Flags:"/"help for x") 本地化。
 	// 放在内置命令创建之后: 它们也是命令树的一部分, 漏掉就还是英文。
@@ -219,12 +224,6 @@ func localizeBuiltins(c *cobra.Command) {
 		case "help":
 			sub.Short = T("任意命令的帮助信息")
 			sub.Long = T("显示任意命令的帮助信息; 用法: mihomo-cli help [command]")
-		case "completion":
-			sub.Short = T("生成指定 shell 的自动补全脚本")
-			sub.Long = T("为指定的 shell 生成自动补全脚本 (bash/zsh/fish/powershell)。")
-			for _, sh := range sub.Commands() {
-				sh.Short = T("生成") + " " + sh.Name() + " " + T("补全脚本")
-			}
 		}
 		localizeBuiltins(sub)
 	}

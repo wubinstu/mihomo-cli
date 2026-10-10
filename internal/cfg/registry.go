@@ -193,7 +193,7 @@ var Keys = []Key{
 		Example: "config set cli.test-url http://cp.cloudflare.com/generate_204",
 		Get:     func(s *app.Settings) string { return s.TestURL },
 		Set:     func(s *app.Settings, v string) error { s.TestURL = v; return nil }},
-	{Name: "cli.test-timeout", Section: "cli", Kind: KindInt, Def: "5000", Min: 100, Max: 60000,
+	{Name: "cli.test-timeout-ms", Section: "cli", Kind: KindInt, Def: "5000", Min: 100, Max: 60000,
 		Comp:  []string{"1000", "3000", "5000", "10000"},
 		Usage: "测速超时 (毫秒)",
 		Get:   func(s *app.Settings) string { return strconv.Itoa(s.TestTimeout) },
@@ -211,7 +211,7 @@ var Keys = []Key{
 
 	// ---- systemd timers ----
 	{Name: "timer.sub-auto-update-enabled", Section: "timer", Kind: KindBool, Def: "true",
-		Usage: "订阅定时自动更新",
+		Usage: "定时更新全部订阅 (作用域: 所有订阅)",
 		Get:   func(s *app.Settings) string { return boolStr(s.SubAutoUpdateEnabled) },
 		Set:   func(s *app.Settings, v string) error { s.SubAutoUpdateEnabled = v == "true"; return nil }},
 	{Name: "timer.sub-auto-update-interval", Section: "timer", Kind: KindDur, Def: "24h", Min: 60,
@@ -225,7 +225,7 @@ var Keys = []Key{
 			return err
 		}},
 	{Name: "timer.node-auto-select-enabled", Section: "timer", Kind: KindBool, Def: "false",
-		Usage: "定时对当前分组自动择优",
+		Usage: "定时对当前订阅的当前分组自动择优 (作用域: 仅当前)",
 		Get:   func(s *app.Settings) string { return boolStr(s.NodeAutoSelectEnabled) },
 		Set:   func(s *app.Settings, v string) error { s.NodeAutoSelectEnabled = v == "true"; return nil }},
 	{Name: "timer.node-auto-select-interval", Section: "timer", Kind: KindDur, Def: "30m", Min: 60,
@@ -239,7 +239,7 @@ var Keys = []Key{
 			return err
 		}},
 	{Name: "timer.resource-auto-update-enabled", Section: "timer", Kind: KindBool, Def: "false",
-		Usage: "定时自动更新 geo 资源文件",
+		Usage: "定时更新 geo 资源文件 (作用域: 全局)",
 		Get:   func(s *app.Settings) string { return boolStr(s.ResourceAutoUpdateEnabled) },
 		Set:   func(s *app.Settings, v string) error { s.ResourceAutoUpdateEnabled = v == "true"; return nil }},
 	{Name: "timer.resource-auto-update-interval", Section: "timer", Kind: KindDur, Def: "24h", Min: 3600,
@@ -254,10 +254,10 @@ var Keys = []Key{
 		}},
 
 	// ---- dns 段 (点号路径; 只用过一次才写进内核 yaml) ----
-	dnsKey("dns.enable", KindBool, "false", "启用 DNS 覆写 (覆盖订阅的 dns 配置)"),
-	dnsKey("dns.ipv6", KindBool, "false", "DNS 解析 IPv6 结果 (AAAA)"),
+	dnsKey("core.dns.enable", KindBool, "false", "启用 DNS 覆写 (覆盖订阅的 dns 配置)"),
+	dnsKey("core.dns.ipv6", KindBool, "false", "DNS 解析 IPv6 结果 (AAAA)"),
 	func() Key {
-		k := dnsKey("dns.enhanced-mode", KindEnum, "fake-ip", "DNS 增强模式")
+		k := dnsKey("core.dns.enhanced-mode", KindEnum, "fake-ip", "DNS 增强模式")
 		k.Detail = "决定 DNS 对代理域名返回什么地址。fake-ip 兼容性最好; redir-host 返回真实 IP, 便于排查。"
 		k.Values = []ValueDoc{
 			{"fake-ip", "返回虚拟 IP (推荐: 兼容最好, 支持按域名分流)"},
@@ -267,18 +267,18 @@ var Keys = []Key{
 		k.Example = "config set dns.enhanced-mode redir-host"
 		return k
 	}(),
-	dnsKey("dns.fake-ip", KindBool, "true", "启用 Fake-IP (enhanced-mode=fake-ip 时生效)"),
-	dnsKey("dns.fake-ip-range", KindText, "28.0.0.1/8", "Fake-IP 地址段"),
-	dnsKey("dns.use-system-hosts", KindBool, "true", "使用 /etc/hosts"),
-	dnsKey("dns.listen", KindText, "0.0.0.0:53", "DNS 监听地址"),
-	dnsKey("dns.fallback", KindNameList, "sub", "备用 DNS (解析国内域名)"),
-	dnsKey("dns.default-nameserver", KindNameList, "223.5.5.5,119.29.29.29", "DNS 引导解析器 (必须是纯 IP)"),
-	dnsKey("dns.nameserver", KindNameList, "sub", "DNS 服务器列表 (IP 或 DoH/DoT URL)"),
+	dnsKey("core.dns.fake-ip", KindBool, "true", "启用 Fake-IP (enhanced-mode=fake-ip 时生效)"),
+	dnsKey("core.dns.fake-ip-range", KindText, "28.0.0.1/8", "Fake-IP 地址段"),
+	dnsKey("core.dns.use-system-hosts", KindBool, "true", "使用 /etc/hosts"),
+	dnsKey("core.dns.listen", KindText, "0.0.0.0:53", "DNS 监听地址"),
+	dnsKey("core.dns.fallback", KindNameList, "sub", "备用 DNS (解析国内域名)"),
+	dnsKey("core.dns.default-nameserver", KindNameList, "223.5.5.5,119.29.29.29", "DNS 引导解析器 (必须是纯 IP)"),
+	dnsKey("core.dns.nameserver", KindNameList, "sub", "DNS 服务器列表 (IP 或 DoH/DoT URL)"),
 
 	// ---- tun 段 (点号路径; 开启需要 CAP_NET_ADMIN, 见 cmd 的 TUN 安全护栏) ----
-	tunKey("tun.enable", KindBool, "false", "启用 TUN 透明代理 (需要 CAP_NET_ADMIN; 默认关闭)", true),
+	tunKey("core.tun.enable", KindBool, "false", "启用 TUN 透明代理 (需要 CAP_NET_ADMIN; 默认关闭)", true),
 	func() Key {
-		k := tunKey("tun.stack", KindEnum, "mips", "TUN 网络栈", true)
+		k := tunKey("core.tun.stack", KindEnum, "mips", "TUN 网络栈", true)
 		k.Detail = "TUN 网卡用哪种协议栈转发。mips 是内核自研的用户态栈 (默认); system 性能最好但依赖内核特性; gvisor 兼容性最好。"
 		k.Values = []ValueDoc{
 			{"system", "内核协议栈 (性能最好, 需要较新内核; 开了防火墙的平台可能不可用)"},
@@ -289,91 +289,109 @@ var Keys = []Key{
 		k.Example = "config set tun.stack gvisor"
 		return k
 	}(),
-	tunKey("tun.device", KindText, "Meta", "TUN 网卡名", true),
-	tunKey("tun.mtu", KindInt, "9000", "TUN MTU", true),
-	tunKey("tun.dns-hijack", KindList, "0.0.0.0:53", "DNS 劫持规则", true),
-	tunKey("tun.auto-route", KindBool, "true", "自动配置路由表 (iptables/nftables)", true),
-	tunKey("tun.auto-detect-interface", KindBool, "true", "自动检测出口网卡", true),
-	tunKey("tun.strict-route", KindBool, "false", "严格路由 (防止流量绕过; android 生效)", true),
-	tunKey("tun.route-exclude-address", KindCIDRList, "", "不进入 TUN 的网段 (务必包含 SSH 对端)", true),
-	tunKey("tun.endpoint-independent-nat", KindBool, "true", "端点无关 NAT (提升 UDP 兼容性)", true),
-	tunKey("tun.udp-timeout", KindInt, "300", "UDP 会话超时 (秒)", true),
-	tunKey("tun.auto-redirect", KindBool, "true", "自动配置 iptables redirect (Linux)", true),
-	tunKey("tun.iproute2-table-index", KindInt, "2022", "iproute2 路由表编号", true),
+	tunKey("core.tun.device", KindText, "Meta", "TUN 网卡名", true),
+	tunKey("core.tun.mtu", KindInt, "9000", "TUN MTU", true),
+	tunKey("core.tun.dns-hijack", KindList, "0.0.0.0:53", "DNS 劫持规则", true),
+	tunKey("core.tun.auto-route", KindBool, "true", "自动配置路由表 (iptables/nftables)", true),
+	tunKey("core.tun.auto-detect-interface", KindBool, "true", "自动检测出口网卡", true),
+	tunKey("core.tun.strict-route", KindBool, "false", "严格路由 (防止流量绕过; android 生效)", true),
+	tunKey("core.tun.route-exclude-address", KindCIDRList, "", "不进入 TUN 的网段 (务必包含 SSH 对端)", true),
+	tunKey("core.tun.endpoint-independent-nat", KindBool, "true", "端点无关 NAT (提升 UDP 兼容性)", true),
+	tunKey("core.tun.udp-timeout", KindInt, "300", "UDP 会话超时 (秒)", true),
+	tunKey("core.tun.auto-redirect", KindBool, "true", "自动配置 iptables redirect (Linux)", true),
+	tunKey("core.tun.iproute2-table-index", KindInt, "2022", "iproute2 路由表编号", true),
 }
 
 // tunEnum tun.stack 的可选值 (与内核一致: system/gvisor/mixed/mips)
 var tunEnums = map[string][]string{
-	"tun.stack": {"system", "gvisor", "mixed", "mips"},
+	"core.tun.stack": {"system", "gvisor", "mixed", "mips"},
 }
 
 // dnsEnum dns.enhanced-mode 的可选值
 var dnsEnums = map[string][]string{
-	"dns.enhanced-mode": {"fake-ip", "redir-host", "normal"},
+	"core.dns.enhanced-mode": {"fake-ip", "redir-host", "normal"},
 }
 
-// tunKey 构造 tun 段键 (存 [overrides])
+// SecList 读出段里的一个列表键 (逗号分隔的展示形式 → 切片); 没有返回 nil
+func SecList(s *app.Settings, dotted string) []string {
+	v := secGet(s, dotted)
+	if v == "" || v == "sub" {
+		return nil
+	}
+	var out []string
+	for _, it := range strings.Split(v, ",") {
+		if it = strings.TrimSpace(it); it != "" {
+			out = append(out, it)
+		}
+	}
+	return out
+}
+
+// DNSSectionActive dns 段是否注入内核 yaml。
+// 显式 false = 一律不注入 (段里别的键也忽略); true = 注入;
+// 没设开关 = 只要设了 nameserver 就算要用。
+func DNSSectionActive(s *app.Settings) bool {
+	switch secGet(s, "core.dns.enable") {
+	case "false":
+		return false
+	case "true":
+		return true
+	}
+	return secGet(s, "core.dns.nameserver") != ""
+}
+
+// SecStoreName 段名 → 内核 yaml / Overrides 里的段名: core.dns → dns (导出给 render 用)
+func SecStoreName(section string) string { return secStore(section) }
+
+// secStore 段名 → Overrides 里的存储键: core.dns → dns。
+// CLI 键名统一带 core. 前缀 (core.dns.enable 就是内核 yaml 的 dns.enable),
+// 但磁盘上的 [overrides] 段名仍和 yaml 段名一致, 少一层嵌套。
+func secStore(section string) string { return strings.TrimPrefix(section, "core.") }
+
+// tunKey 构造 tun 段键 (存 [overrides.tun])
 func tunKey(name string, kind Kind, def, usage string, restart bool) Key {
 	return Key{
-		Name: name, Section: "tun", Kind: kind, Def: def, Enum: tunEnums[name],
+		Name: name, Section: "core.tun", Kind: kind, Def: def, Enum: tunEnums[name],
 		Usage: usage, Restart: restart,
 		Get: func(s *app.Settings) string { return secGet(s, name) },
 		Set: func(s *app.Settings, v string) error { return secSet(s, name, v, kind, tunEnums[name]) },
 	}
 }
 
-// dnsKey 构造 dns 段键。dns.enable 与 dns.nameserver 额外挂到 DNSServers 字段,
-// 使 dns use / dns on 与 config set dns.* 是同一套存储。
+// dnsKey 构造 dns 段键 (存 [overrides.dns])
 func dnsKey(name string, kind Kind, def, usage string) Key {
 	base := Key{
-		Name: name, Section: "dns", Kind: kind, Def: def, Enum: dnsEnums[name],
+		Name: name, Section: "core.dns", Kind: kind, Def: def, Enum: dnsEnums[name],
 		Usage: usage,
 		Get:   func(s *app.Settings) string { return secGet(s, name) },
 		Set:   func(s *app.Settings, v string) error { return secSet(s, name, v, kind, dnsEnums[name]) },
 	}
-	switch name {
-	case "dns.enable":
+	if name == "core.dns.enable" {
+		// 开关的语义: 显式 false = 整段不注入; true = 注入; 没设 = 只要设了 nameserver 就算要用
+		// (老 `dns use` 的语义, 现在 nameserver 和段里其它键同一个存储, 特权字段没了)
 		base.Get = func(s *app.Settings) string {
-			if len(s.DNSServers) > 0 || secGet(s, "dns.enable") == "true" {
+			if DNSSectionActive(s) {
 				return "true"
-			}
-			if secGet(s, "dns.enable") == "false" {
-				return "false"
 			}
 			return "false"
 		}
 		base.Set = func(s *app.Settings, v string) error {
 			if v == "false" {
-				s.DNSServers = nil
-				return secDel(s, "dns.enable")
+				// 显式写 false: 盖住可能已存在的 nameserver, 整段不注入
+				return secSet(s, "core.dns.enable", "false", KindBool, nil)
 			}
-			return secSet(s, "dns.enable", "true", KindBool, nil)
+			return secSet(s, "core.dns.enable", "true", KindBool, nil)
 		}
-	case "dns.nameserver":
+	}
+	if name == "core.dns.nameserver" {
+		// 没设过就报 "sub" (跟随订阅), 和默认值一致; 否则 SETTING 列会显示 "-"
 		base.Get = func(s *app.Settings) string {
-			if len(s.DNSServers) == 0 {
-				return "sub"
+			if v := secGet(s, "core.dns.nameserver"); v != "" {
+				return v
 			}
-			return strings.Join(s.DNSServers, ",")
+			return "sub"
 		}
 		base.Resolve = resolveDNSValue // 预设名 / subN → 逗号分隔的真实值
-		base.Set = func(s *app.Settings, v string) error {
-			if v == "sub" {
-				s.DNSServers = nil
-				return nil
-			}
-			var items []string
-			for _, it := range strings.Split(v, ",") {
-				if it = strings.TrimSpace(it); it != "" {
-					items = append(items, it)
-				}
-			}
-			if len(items) == 0 {
-				return fmt.Errorf("%s: ip|url,ip|url", v)
-			}
-			s.DNSServers = items
-			return nil
-		}
 		// 值域: 预设名 / subN / IP / DoH-DoT URL / sub
 		base.CompFn = func() []string { return dnsPresetNames() } // 间接一层, 让 cmd 包后注入的预设名生效
 		base.Detail = "DNS 服务器列表。可以填预设名 (TAB 可补全)、订阅编号 subN、裸 IP 或 DoH/DoT URL;\n" +
@@ -385,7 +403,7 @@ func dnsKey(name string, kind Kind, def, usage string) Key {
 			{"<url>", "DoH/DoT 地址, 如 https://dns.alidns.com/dns-query"},
 			{"sub", "跟随订阅, CLI 不注入"},
 		}
-		base.Example = "config set dns.nameserver cloudflare"
+		base.Example = "config set core.dns.nameserver cloudflare"
 	}
 	return base
 }
@@ -393,11 +411,12 @@ func dnsKey(name string, kind Kind, def, usage string) Key {
 // ---- Overrides (点号路径) 访问器 ----
 
 // secGet 读 [overrides] 里的点号路径值; 不存在返回 ""
+// dotted 是完整键名 (core.dns.enable), 落到 Overrides 时去掉 core. 前缀 → dns.enable
 func secGet(s *app.Settings, dotted string) string {
 	if s.Overrides == nil {
 		return ""
 	}
-	parts := strings.Split(dotted, ".")
+	parts := strings.Split(stripCore(dotted), ".")
 	var cur any = s.Overrides
 	for i, p := range parts {
 		m, ok := cur.(map[string]any)
@@ -425,7 +444,7 @@ func secSet(s *app.Settings, dotted, v string, kind Kind, enum []string) error {
 	if parsed == "sub" {
 		return secDel(s, dotted)
 	}
-	parts := strings.Split(dotted, ".")
+	parts := strings.Split(stripCore(dotted), ".")
 	if s.Overrides == nil {
 		s.Overrides = map[string]any{}
 	}
@@ -447,7 +466,7 @@ func secDel(s *app.Settings, dotted string) error {
 	if s.Overrides == nil {
 		return nil
 	}
-	parts := strings.Split(dotted, ".")
+	parts := strings.Split(stripCore(dotted), ".")
 	cur := s.Overrides
 	for _, p := range parts[:len(parts)-1] {
 		next, ok := cur[p].(map[string]any)
@@ -478,38 +497,40 @@ func secUsed(s *app.Settings, section string) bool {
 	if s.Overrides == nil {
 		return false
 	}
-	m, ok := s.Overrides[section].(map[string]any)
+	m, ok := s.Overrides[secStore(section)].(map[string]any)
 	return ok && len(m) > 0
 }
+
+// stripCore 去掉键名/段名的 core. 前缀, 得到 Overrides 里的存储路径
+// (core.dns.enable → dns.enable; core.dns → dns)
+func stripCore(dotted string) string { return strings.TrimPrefix(dotted, "core.") }
 
 // SecHas 某个点号路径键是否真的被 set 过 (不是"段里有没有别的键")
 func SecHas(s *app.Settings, dotted string) bool {
 	if s.Overrides == nil {
 		return false
 	}
-	parts := strings.Split(dotted, ".")
-	cur := s.Overrides
+	parts := strings.Split(stripCore(dotted), ".")
+	var cur any = s.Overrides
 	for i, p := range parts {
-		m, ok := cur[p].(map[string]any)
+		m, ok := cur.(map[string]any)
 		if !ok {
 			return false
 		}
-		if _, exists := m[p]; !exists {
+		v, exists := m[p]
+		if !exists {
 			return false
 		}
 		if i == len(parts)-1 {
 			return true
 		}
-		cur = m
+		cur = v
 	}
 	return false
 }
 
 // SectionUsed 段是否被使用过 (对外)
 func SectionUsed(s *app.Settings, section string) bool {
-	if section == "dns" {
-		return len(s.DNSServers) > 0 || secUsed(s, "dns")
-	}
 	return secUsed(s, section)
 }
 
@@ -618,7 +639,7 @@ func SetGeneric(s *app.Settings, dotted, v string) error {
 	if err != nil {
 		return err
 	}
-	parts := strings.Split(dotted, ".")
+	parts := strings.Split(stripCore(dotted), ".")
 	if s.Overrides == nil {
 		s.Overrides = map[string]any{}
 	}
@@ -663,12 +684,12 @@ func inferValue(s string) any {
 	return s
 }
 
-// ShownSections config get 默认要露面的段 (dns/tun): 只看总开关是否有效开启。
+// ShownSections config get 默认要露面的段 (core.dns/core.tun): 只看总开关是否有效开启。
 // 别的键设了但 <段>.enable 没开 = 这段压根不参与渲染, 摆出来只会误导 ——
 // v1.4.2 用户反馈"改任意一个字段后整段都冒出来"不合理, 改成只看 enable。
 func ShownSections(s *app.Settings) []string {
 	var out []string
-	for _, sec := range []string{"dns", "tun"} {
+	for _, sec := range []string{"core.dns", "core.tun"} {
 		if SectionShown(s, sec) {
 			out = append(out, sec)
 		}
@@ -688,7 +709,7 @@ func SectionShown(s *app.Settings, section string) bool {
 // HiddenSections 段里有设置、但总开关没开的段 (config get 末尾给一行提示用)
 func HiddenSections(s *app.Settings) []string {
 	var out []string
-	for _, sec := range []string{"dns", "tun"} {
+	for _, sec := range []string{"core.dns", "core.tun"} {
 		if SectionUsed(s, sec) && !SectionShown(s, sec) {
 			out = append(out, sec)
 		}
@@ -701,7 +722,7 @@ func OverrideSection(s *app.Settings, section string) map[string]any {
 	if s.Overrides == nil {
 		return nil
 	}
-	m, _ := s.Overrides[section].(map[string]any)
+	m, _ := s.Overrides[secStore(section)].(map[string]any)
 	if len(m) == 0 {
 		return nil
 	}

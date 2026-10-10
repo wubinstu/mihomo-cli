@@ -51,7 +51,7 @@ type ValueDoc struct {
 
 // Key 一个配置项的完整描述
 type Key struct {
-	Name     string // "core.mixed-port" / "tun.enable"
+	Name     string // "core.mixed-port" / "core.tun.enable"
 	Section  string // core | cli | timer | dns | tun
 	Kind     Kind
 	Def      string                                      // 默认值 (展示与 reset-default); "" = 无默认值
@@ -148,7 +148,7 @@ func (k Key) ValueDocs() []ValueDoc {
 // 点号路径段 (dns/tun) 相反: 没被 set 过就完全不写, 订阅/内核原样保留
 func (k Key) Managed() bool {
 	switch k.Section {
-	case "dns", "tun":
+	case "core.dns", "core.tun":
 		return false
 	}
 	return true
@@ -172,7 +172,7 @@ func (k Key) Top() string {
 }
 
 // SectionOrder 段展示顺序
-var SectionOrder = []string{"core", "cli", "timer", "dns", "tun"}
+var SectionOrder = []string{"core", "cli", "timer", "core.dns", "core.tun"}
 
 // SectionTitles 段标题 (展示用; 跟随语言)
 func SectionTitles(section string) string {
@@ -183,9 +183,9 @@ func SectionTitles(section string) string {
 		return i18n.T("cli")
 	case "timer":
 		return i18n.T("systemd timers")
-	case "dns":
+	case "core.dns":
 		return i18n.T("dns")
-	case "tun":
+	case "core.tun":
 		return i18n.T("tun")
 	}
 	return section

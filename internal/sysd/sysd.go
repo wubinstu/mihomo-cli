@@ -134,7 +134,7 @@ Description=mihomo-cli: subscription update timer service
 
 [Service]
 Type=oneshot
-ExecStart=%s sub update
+ExecStart=%s sub update all
 `, cli)
 	subTimer := fmt.Sprintf(`[Unit]
 Description=mihomo-cli: subscription update timer

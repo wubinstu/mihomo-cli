@@ -27,9 +27,9 @@ var configCmd = &cobra.Command{
 		T("手动改动后执行 config apply 以配置文件覆盖运行中的服务, config adopt 反之;") + "\n" +
 		T("撤销某个键的接管用 config unset <key>。") + "\n\n" +
 		T("点号路径可读写内核任意配置段:") + "\n" +
-		"  mihomo-cli config set tun.enable true\n" +
-		"  mihomo-cli config set dns.fake-ip-range 28.0.0.1/8\n" +
-		"  mihomo-cli config set dns.nameserver 223.5.5.5,119.29.29.29",
+		"  mihomo-cli config set core.tun.enable true\n" +
+		"  mihomo-cli config set core.dns.fake-ip-range 28.0.0.1/8\n" +
+		"  mihomo-cli config set core.dns.nameserver 223.5.5.5,119.29.29.29",
 }
 
 // ---- get ----
@@ -719,7 +719,7 @@ func genericKeyHelp(name string) error {
 
 // keyExtraDoc 某些键的附加说明表 (目前只有 DNS 预设)
 func keyExtraDoc(name string) string {
-	if name != "dns.nameserver" {
+	if name != "core.dns.nameserver" {
 		return ""
 	}
 	rows := make([][2]string, 0, len(dnsPresets))
@@ -843,7 +843,7 @@ func buildSetHelp() string {
 	b.WriteString(ui.ExampleLines([][2]string{
 		{"mihomo-cli config set sniffer.enable true", T("开启域名嗅探")},
 		{"mihomo-cli config set geodata-mode false", T("用 metadb 而不是 dat")},
-		{"mihomo-cli config set dns.fake-ip-range 28.0.0.1/8", T("改 Fake-IP 段")},
+		{"mihomo-cli config set core.dns.fake-ip-range 28.0.0.1/8", T("改 Fake-IP 段")},
 	}, 2))
 	return b.String()
 }
