@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strings"
 	"testing"
 )
@@ -19,7 +18,7 @@ func TestAllKeysTranslated(t *testing.T) {
 		if err != nil {
 			continue
 		}
-		for _, m := range regexp.MustCompile(`T\("((?:[^"\\]|\\.)*)"\)`).FindAllStringSubmatch(string(data), -1) {
+		for _, m := range regexp.MustCompile(`(?:i18n\.)?T\("((?:[^"\\]|\\.)*)"`).FindAllStringSubmatch(string(data), -1) {
 			key := unescape(m[1])
 			if _, ok := en[key]; !ok {
 				missing[key] = true
@@ -29,28 +28,6 @@ func TestAllKeysTranslated(t *testing.T) {
 	}
 	if len(missing) > 0 {
 		t.Logf("run: grep -ohE 'T\\(\"[^\"]+\"\\)' internal/*/*.go | sed 's/T(\"//;s/\")//' | sort -u")
-	}
-}
-
-// TestNoOrphanKeys en 表里不应有源码已不再使用的 key (防止词条腐化)
-func TestNoOrphanKeys(t *testing.T) {
-	root := repoRoot(t)
-	used := map[string]bool{}
-	for _, f := range goFiles(t, root) {
-		data, _ := os.ReadFile(f)
-		for _, m := range regexp.MustCompile(`T\("((?:[^"\\]|\\.)*)"\)`).FindAllStringSubmatch(string(data), -1) {
-			used[unescape(m[1])] = true
-		}
-	}
-	var orphans []string
-	for k := range en {
-		if !used[k] {
-			orphans = append(orphans, k)
-		}
-	}
-	sort.Strings(orphans)
-	if len(orphans) > 0 {
-		t.Logf("orphan en entries (harmless, translations kept for reuse): %d", len(orphans))
 	}
 }
 

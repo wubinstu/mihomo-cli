@@ -145,13 +145,16 @@ func Table(w io.Writer, rows [][]string, gap int) {
 		}
 		fmt.Fprintln(w, b.String())
 		if ri == 0 {
-			// 表头下分隔线
+			// 表头下分隔线: 每列占 widths[i]+gap (和行内 padding 一致),
+			// 少算一个 gap 就会整条线相对表头左移 —— 累计到最后一列差好几个字符。
+			// v1.4.1 在 TableSections 上踩过, 这里同样钉死。
 			var line strings.Builder
 			for i := 0; i < len(widths); i++ {
-				if i > 0 {
-					line.WriteString(strings.Repeat(" ", gap))
+				n := widths[i]
+				if i < len(widths)-1 {
+					n += gap
 				}
-				line.WriteString(strings.Repeat("-", widths[i]))
+				line.WriteString(strings.Repeat("-", n))
 			}
 			fmt.Fprintln(w, line.String())
 		}
@@ -285,6 +288,42 @@ func Align2(rows [][2]string, gap int) string {
 
 // ExampleLines "命令 # 注释" 示例块: 命令列对齐, 注释列统一起点
 // (install/uninstall/resource/dns/tun 的帮助都用它, 不再手敲空格)
+// RealignExamples 把一段帮助文本里的示例块按当前语言重新对齐。
+// 示例行的列宽是在包初始化时按中文算的, 语言切成英文后命令列长短变了, 得重排 ——
+// 典型例子: <订阅URL> → <subscription URL> 会撑宽一列。
+func RealignExamples(s string) string {
+	lines := strings.Split(s, "\n")
+	type ex struct {
+		cmd, desc string
+		idx       int
+	}
+	var exs []ex
+	for i, l := range lines {
+		if !strings.HasPrefix(l, "mihomo-cli ") && !strings.HasPrefix(l, "eval ") &&
+			!strings.HasPrefix(l, "sudo ") && !strings.HasPrefix(l, "curl ") {
+			continue
+		}
+		j := strings.Index(l, "# ")
+		if j < 0 {
+			continue
+		}
+		exs = append(exs, ex{strings.TrimRight(l[:j], " "), l[j+2:], i})
+	}
+	if len(exs) < 2 {
+		return s
+	}
+	w := 0
+	for _, e := range exs {
+		if x := Width(e.cmd); x > w {
+			w = x
+		}
+	}
+	for _, e := range exs {
+		lines[e.idx] = Pad(e.cmd, w+2) + "# " + e.desc
+	}
+	return strings.Join(lines, "\n")
+}
+
 func ExampleLines(items [][2]string, gap int) string {
 	if gap < 1 {
 		gap = 1

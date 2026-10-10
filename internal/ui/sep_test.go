@@ -74,3 +74,47 @@ func TestSeparatorAlignsWithHeader(t *testing.T) {
 		}
 	}
 }
+
+// TestTableSeparatorAlignsWithHeader ui.Table 的分隔线也必须和表头逐列对齐
+// (ping/status 用它; v1.4.2 发现它和 TableSections 有同一个 gap 漏算)
+func TestTableSeparatorAlignsWithHeader(t *testing.T) {
+	rows := [][]string{
+		{"SITE", "HTTP", "DELAY", "STATUS"},
+		{"GitHub", "200", "915 ms", "available"},
+		{"哔哩哔哩大陆", "200", "386 ms", "available"},
+		{"Docker Hub", "401", "1485 ms", "available"},
+	}
+	var buf bytes.Buffer
+	Table(&buf, rows, 2)
+	lines := strings.Split(strings.TrimRight(buf.String(), "\n"), "\n")
+	if len(lines) < 3 {
+		t.Fatalf("want header+separator+rows, got %d lines", len(lines))
+	}
+	hs := cellStarts(lines[0])
+	sep := lines[1]
+	// 分隔线现在是连续长划线, 没法按"划线组"数列; 改成验证每一列的开头位置都有划线
+	for i, start := range hs {
+		if start >= len(sep) || sep[start] != '-' {
+			t.Errorf("column %d starts at %d but the separator has %q there", i, start,
+				string(runeAt(sep, start)))
+		}
+	}
+	// 分隔线总长 = 最后一列起点 + 该列内容宽度 (表头最后列之后可能有尾空格)
+	want := hs[len(hs)-1] + Width(strings.TrimRight(lines[0], " ")[hs[len(hs)-1]:])
+	if len(strings.TrimRight(sep, "-")) != 0 {
+		t.Errorf("separator has non-dash chars: %q", sep)
+	}
+	if len(sep) < want {
+		t.Errorf("separator is %d chars, want at least %d (last column start+width)", len(sep), want)
+	}
+}
+
+func runeAt(s string, i int) rune {
+	for _, r := range s {
+		if i <= 0 {
+			return r
+		}
+		i--
+	}
+	return ' '
+}

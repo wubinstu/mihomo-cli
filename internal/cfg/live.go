@@ -151,6 +151,9 @@ func (l *Live) Value(k Key) string {
 }
 
 // normRun 把 /configs 的值归一化成与 SETTING 同形的字符串
+// NormRunForTest 运行态值的归一化规则 (测试探针; 线上走 Live.Value)
+func NormRunForTest(k Key, v any) string { return normRun(k, v) }
+
 func normRun(k Key, v any) string {
 	switch k.Kind {
 	case KindPort:
@@ -176,6 +179,16 @@ func normRun(k Key, v any) string {
 		return "-"
 	case KindList, KindNameList, KindCIDRList:
 		return scalarStr(v)
+	case KindEnum:
+		raw := scalarStr(v)
+		// 内核回显大小写不统一 (Mips/Mixed/gVisor/System); 只要大小写无关地对得上
+		// 我们的值域, 就按我们的拼法显示, 免得 RUNNING 和 SETTING 看起来对不上。
+		for _, e := range k.Enum {
+			if strings.EqualFold(e, raw) {
+				return e
+			}
+		}
+		return raw // 值域外的值原样显示 (内核可能比我们知道得多)
 	}
 	return scalarStr(v)
 }
@@ -229,6 +242,9 @@ func normCompare(k Key, v string) string {
 		}
 		if k.Kind == KindPort && (v == "off" || v == "0") {
 			return "off"
+		}
+		if k.Kind == KindEnum {
+			return strings.ToLower(v) // 内核回显 Mips/Mixed/gVisor, 与我们的小写值域对齐
 		}
 		return v
 	case KindDur:

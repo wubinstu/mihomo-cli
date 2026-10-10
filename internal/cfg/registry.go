@@ -278,19 +278,20 @@ var Keys = []Key{
 	// ---- tun 段 (点号路径; 开启需要 CAP_NET_ADMIN, 见 cmd 的 TUN 安全护栏) ----
 	tunKey("tun.enable", KindBool, "false", "启用 TUN 透明代理 (需要 CAP_NET_ADMIN; 默认关闭)", true),
 	func() Key {
-		k := tunKey("tun.stack", KindEnum, "mixed", "TUN 网络栈", true)
-		k.Detail = "TUN 网卡用哪种协议栈转发。system 性能最好但依赖内核特性; gvisor 兼容性最好。"
+		k := tunKey("tun.stack", KindEnum, "mips", "TUN 网络栈", true)
+		k.Detail = "TUN 网卡用哪种协议栈转发。mips 是内核自研的用户态栈 (默认); system 性能最好但依赖内核特性; gvisor 兼容性最好。"
 		k.Values = []ValueDoc{
-			{"system", "内核协议栈 (性能最好, 需要较新内核)"},
+			{"system", "内核协议栈 (性能最好, 需要较新内核; 开了防火墙的平台可能不可用)"},
 			{"gvisor", "用户态协议栈 (兼容性最好, 性能一般)"},
-			{"mixed", "两者混合 (默认)"},
+			{"mixed", "TCP 走 system、其余走 gvisor (两者混合)"},
+			{"mips", "内核自研用户态协议栈 (mipstack, 默认)"},
 		}
 		k.Example = "config set tun.stack gvisor"
 		return k
 	}(),
-	tunKey("tun.device", KindText, "mihomo", "TUN 网卡名", true),
+	tunKey("tun.device", KindText, "Meta", "TUN 网卡名", true),
 	tunKey("tun.mtu", KindInt, "9000", "TUN MTU", true),
-	tunKey("tun.dns-hijack", KindList, "any:53,tcp://any:53", "DNS 劫持规则", true),
+	tunKey("tun.dns-hijack", KindList, "0.0.0.0:53", "DNS 劫持规则", true),
 	tunKey("tun.auto-route", KindBool, "true", "自动配置路由表 (iptables/nftables)", true),
 	tunKey("tun.auto-detect-interface", KindBool, "true", "自动检测出口网卡", true),
 	tunKey("tun.strict-route", KindBool, "false", "严格路由 (防止流量绕过; android 生效)", true),
@@ -301,9 +302,9 @@ var Keys = []Key{
 	tunKey("tun.iproute2-table-index", KindInt, "2022", "iproute2 路由表编号", true),
 }
 
-// tunEnum tun.stack 的可选值
+// tunEnum tun.stack 的可选值 (与内核一致: system/gvisor/mixed/mips)
 var tunEnums = map[string][]string{
-	"tun.stack": {"system", "gvisor", "mixed"},
+	"tun.stack": {"system", "gvisor", "mixed", "mips"},
 }
 
 // dnsEnum dns.enhanced-mode 的可选值
@@ -662,11 +663,33 @@ func inferValue(s string) any {
 	return s
 }
 
-// UsedSections 已使用(非 core/cli/timer)的段名
-func UsedSections(s *app.Settings) []string {
+// ShownSections config get 默认要露面的段 (dns/tun): 只看总开关是否有效开启。
+// 别的键设了但 <段>.enable 没开 = 这段压根不参与渲染, 摆出来只会误导 ——
+// v1.4.2 用户反馈"改任意一个字段后整段都冒出来"不合理, 改成只看 enable。
+func ShownSections(s *app.Settings) []string {
 	var out []string
 	for _, sec := range []string{"dns", "tun"} {
-		if SectionUsed(s, sec) {
+		if SectionShown(s, sec) {
+			out = append(out, sec)
+		}
+	}
+	return out
+}
+
+// SectionShown 段的总开关是否有效开启
+func SectionShown(s *app.Settings, section string) bool {
+	k := Lookup(section + ".enable")
+	if k == nil {
+		return SectionUsed(s, section)
+	}
+	return k.Effective(s) == "true"
+}
+
+// HiddenSections 段里有设置、但总开关没开的段 (config get 末尾给一行提示用)
+func HiddenSections(s *app.Settings) []string {
+	var out []string
+	for _, sec := range []string{"dns", "tun"} {
+		if SectionUsed(s, sec) && !SectionShown(s, sec) {
 			out = append(out, sec)
 		}
 	}

@@ -15,28 +15,33 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/wubinstu/mihomo-cli/internal/i18n"
+
 	"github.com/wubinstu/mihomo-cli/internal/ui"
 )
 
 // pingSite 检测站点: 延迟 + 可达性/解锁启发式判定
 type pingSite struct {
+	// Name 是翻译 key (包初始化时语言还是中文), 渲染时用 siteName 再翻一次
 	Name string
 	URL  string
-	// Unlock 判定: 2xx/3xx=解锁(可用), 403/451=受限, 其他/超时=失败
-	Expect func(code int) string // 返回 ok/limited/unknown 描述
+	// OK 自定义"这个状态码算可用"的判定 (nil = 2xx/3xx 都算)。
+	// Docker Hub 的 registry 匿名访问就是回 401, 那是正常的鉴权挑战, 不是被墙。
+	OK func(code int) bool
 }
 
 var pingSites = []pingSite{
 	{"GitHub", "https://api.github.com", nil},
+	{"Docker Hub", "https://registry-1.docker.io/v2/", func(code int) bool {
+		return code == 200 || code == 401
+	}},
 	{"Apple", "https://www.apple.com", nil},
 	{"Google", "https://www.google.com/generate_204", nil},
 	{"YouTube", "https://www.youtube.com/generate_204", nil},
 	{T("哔哩哔哩大陆"), "https://www.bilibili.com", nil},
-	{T("哔哩哔哩港澳台"), "https://www.bilibili.com", func(code int) string {
-		if code == 200 {
-			return "unverified"
-		}
-		return "unknown"
+	{T("哔哩哔哩港澳台"), "https://www.bilibili.com", func(code int) bool {
+		// 大陆 IP 会被重定向到大陆版, 拿不到港澳台内容; 这里只能报"通不通"
+		return code == 200
 	}},
 	{"ChatGPT Web", "https://ios.chat.openai.com/public-api/mobile/server_status/v1", nil},
 	{"Claude", "https://claude.ai", nil},
@@ -104,23 +109,18 @@ var pingCmd = &cobra.Command{
 				ms := time.Since(start).Milliseconds()
 				cancel()
 				if err != nil {
-					results[i] = result{st.Name, 0, ms, "timeout"}
+					results[i] = result{siteName(&st), 0, ms, "timeout"}
 					return
 				}
 				io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
 				resp.Body.Close()
-				verdict := ""
-				if st.Expect != nil {
-					verdict = st.Expect(resp.StatusCode)
-				}
-				_ = verdict
-				results[i] = result{st.Name, resp.StatusCode, ms, ""}
+				results[i] = result{siteName(&st), resp.StatusCode, ms, ""}
 			}(i, st)
 		}
 		wg.Wait()
 
 		rows := [][]string{{T("站点"), "HTTP", T("延迟"), T("状态")}}
-		for _, r := range results {
+		for i, r := range results {
 			status, delay, color := T("超时"), ui.ColorDelay(-1), "\x1b[90m"
 			switch {
 			case r.err != "":
@@ -128,7 +128,7 @@ var pingCmd = &cobra.Command{
 				status = T("受限")
 				delay = ui.ColorDelay(4000)
 				color = "\x1b[31m"
-			case r.code >= 200 && r.code < 400:
+			case siteOK(&sites[i], r.code):
 				status = T("可用")
 				delay = ui.ColorDelay(int(r.ms))
 				color = "\x1b[32m"
@@ -141,9 +141,20 @@ var pingCmd = &cobra.Command{
 			rows = append(rows, []string{r.name, itoa(r.code), delay, status})
 		}
 		ui.Table(os.Stdout, rows, 2)
-		fmt.Println(T("说明: 可用=HTTP 2xx/3xx, 受限=403/451(地区限制), 判定为启发式仅供参考"))
+		fmt.Println(T("说明: 可用=HTTP 2xx/3xx (Docker Hub 的 401 是匿名鉴权挑战, 也算通), 受限=403/451(地区限制), 判定为启发式仅供参考"))
 		return nil
 	},
+}
+
+// siteName 站点显示名 (跟随当前语言)
+func siteName(st *pingSite) string { return i18n.T(st.Name) }
+
+// siteOK 该站点的这个状态码算不算"可用"
+func siteOK(st *pingSite, code int) bool {
+	if st.OK != nil {
+		return st.OK(code)
+	}
+	return code >= 200 && code < 400
 }
 
 func itoa(n int) string {

@@ -121,20 +121,25 @@ func (k Key) Spec() string {
 // 只有"取值含义差异大"的键才手写 (proxy-mode/log-level/enhanced-mode/stack…)
 func (k Key) ValueDocs() []ValueDoc {
 	if len(k.Values) > 0 {
-		return k.Values
+		out := make([]ValueDoc, len(k.Values))
+		for i, v := range k.Values {
+			out[i] = ValueDoc{Name: i18n.T(v.Name), Desc: i18n.T(v.Desc)}
+		}
+		return out
 	}
 	var out []ValueDoc
 	switch k.Kind {
 	case KindBool:
-		out = []ValueDoc{{"true", "开启"}, {"false", "关闭"}}
+		out = []ValueDoc{{"true", i18n.T("开启")}, {"false", i18n.T("关闭")}}
 	case KindTri:
-		out = []ValueDoc{{"true", "开启"}, {"false", "关闭"}, {"sub", "跟随订阅: 不注入, 用订阅/内核的值"}}
+		out = []ValueDoc{{"true", i18n.T("开启")}, {"false", i18n.T("关闭")},
+			{"sub", i18n.T("跟随订阅: 不注入, 用订阅/内核的值")}}
 	case KindPort:
-		out = []ValueDoc{{"off", "关闭该端口, 不监听 (输入 0/none/- 也可以)"},
-			{"sub", "跟随订阅: 订阅写了才监听"}, {"<端口号>", "监听指定端口 (1-65535)"}}
+		out = []ValueDoc{{"off", i18n.T("关闭该端口, 不监听 (输入 0/none/- 也可以)")},
+			{"sub", i18n.T("跟随订阅: 订阅写了才监听")}, {i18n.T("<端口号>"), i18n.T("监听指定端口 (1-65535)")}}
 	case KindMirror:
-		out = []ValueDoc{{"auto", "自动: 依次尝试内置镜像列表"},
-			{"<url>", "固定使用该镜像站前缀, 如 https://ghfast.top"}}
+		out = []ValueDoc{{"auto", i18n.T("自动: 依次尝试内置镜像列表")},
+			{i18n.T("<url>"), i18n.T("固定使用该镜像站前缀, 如 https://ghfast.top")}}
 	}
 	return out
 }
@@ -169,19 +174,19 @@ func (k Key) Top() string {
 // SectionOrder 段展示顺序
 var SectionOrder = []string{"core", "cli", "timer", "dns", "tun"}
 
-// SectionTitles 段标题 (展示用)
+// SectionTitles 段标题 (展示用; 跟随语言)
 func SectionTitles(section string) string {
 	switch section {
 	case "core":
-		return "core config"
+		return i18n.T("core config")
 	case "cli":
-		return "cli"
+		return i18n.T("cli")
 	case "timer":
-		return "systemd timers"
+		return i18n.T("systemd timers")
 	case "dns":
-		return "dns"
+		return i18n.T("dns")
 	case "tun":
-		return "tun"
+		return i18n.T("tun")
 	}
 	return section
 }

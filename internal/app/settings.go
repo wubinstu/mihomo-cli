@@ -192,6 +192,28 @@ func (s *Settings) ProxyPort() int {
 	return 7890
 }
 
+// ConfigLanguage 只从 config.toml 里取语言设置 (i18n 在包初始化时就要用, 不能等 LoadSettings)。
+// 新旧两种磁盘格式都认: v1.4.1+ 是 [cli] language, 更早是扁平键 cli_language。
+func ConfigLanguage() string {
+	data, err := os.ReadFile(SettingsFile)
+	if err != nil {
+		return ""
+	}
+	var v struct {
+		Language string `toml:"cli_language"` // <=v1.4.0 扁平键
+		CLI      struct {
+			Language string `toml:"language"`
+		} `toml:"cli"` // v1.4.1+ 表
+	}
+	if err := toml.Unmarshal(data, &v); err != nil {
+		return ""
+	}
+	if l := strings.ToLower(strings.TrimSpace(v.CLI.Language)); l != "" {
+		return l
+	}
+	return strings.ToLower(strings.TrimSpace(v.Language))
+}
+
 // LoadSettings 读取配置; 文件不存在时返回默认值
 // 认不出来的键一律**报错**而不是静默忽略 —— 历史上两次弄丢用户配置都是"静默解码"造成的。
 func LoadSettings() (*Settings, error) {
@@ -693,6 +715,14 @@ func (s *Settings) FindProfile(name string) *Profile {
 // Current 返回当前生效的订阅 (current_profile 为空时悬空, 返回 nil)
 func (s *Settings) Current() *Profile {
 	return s.FindProfile(s.CurrentProfile)
+}
+
+// CurrentUpdatedAt 当前订阅的更新时间 (没有订阅时给零值, 免得到处判空)
+func (s *Settings) CurrentUpdatedAt() time.Time {
+	if p := s.Current(); p != nil {
+		return p.UpdatedAt
+	}
+	return time.Time{}
 }
 
 // EnabledRules 仅启用的用户规则

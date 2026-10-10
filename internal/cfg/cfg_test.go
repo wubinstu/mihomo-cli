@@ -1,6 +1,10 @@
 package cfg
 
 import (
+	"io/fs"
+	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -277,21 +281,36 @@ func TestCompleteKeysTwoLevels(t *testing.T) {
 func TestRegistryUsageTranslated(t *testing.T) {
 	i18n.Set("en") // T() 只在 en 模式下查表
 	defer i18n.Set("zh")
+	// 详版帮助里的每个用户可见字段都要过一遍: usage / detail / 每个取值的说明
 	for _, k := range Keys {
 		if k.Usage == "" {
 			t.Errorf("%s: empty usage", k.Name)
-			continue
 		}
-		if i18n.T(k.Usage) == k.Usage && !hasCJK(k.Usage) {
-			// 纯英文的 usage 也允许 (已经是英文)
-			continue
+		checkTranslated(t, k.Name+".usage", k.Usage)
+		if k.Detail != "" {
+			checkTranslated(t, k.Name+".detail", k.Detail)
 		}
-		if hasCJK(k.Usage) && i18n.T(k.Usage) == k.Usage {
-			t.Errorf("%s: usage %q is not in the en table (leaks Chinese in en mode)", k.Name, k.Usage)
+		for _, v := range k.Values {
+			checkTranslated(t, k.Name+".values."+v.Name, v.Desc)
 		}
-		if !hasCJK(k.Usage) && i18n.T(k.Usage) != k.Usage {
-			t.Errorf("%s: usage %q looks English but the en table remaps it to %q", k.Name, k.Usage, i18n.T(k.Usage))
+	}
+}
+
+// checkTranslated 中文字符串必须在 en 表里; 纯英文的必须原样返回 (不许被映射成别的)
+func checkTranslated(t *testing.T, where, s string) {
+	t.Helper()
+	if s == "" {
+		return
+	}
+	got := i18n.T(s)
+	if hasCJK(s) {
+		if got == s {
+			t.Errorf("%s: %q is not in the en table (leaks Chinese in en mode)", where, s)
 		}
+		return
+	}
+	if got != s {
+		t.Errorf("%s: %q looks English but the en table remaps it to %q", where, s, got)
 	}
 }
 
@@ -345,5 +364,55 @@ func TestDurCountdown(t *testing.T) {
 		if got := DurCountdown(d); got != want {
 			t.Errorf("DurCountdown(%s) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// TestNoOrphanTranslations en 表里不应有没人用的 key。
+// 放在 cfg 包而不是 i18n 包: 注册表的 Usage/Detail/Values 也是翻译 key, 但它们是
+// 结构体字段、不是 T("…") 字面量, i18n 包的静态扫描看不出来。
+func TestNoOrphanTranslations(t *testing.T) {
+	used := map[string]bool{}
+	var root string
+	// 1) 注册表里的全部用户可见字符串
+	for _, k := range Keys {
+		used[k.Usage] = true
+		used[k.Detail] = true
+		for _, v := range k.Values {
+			used[v.Name] = true
+			used[v.Desc] = true
+		}
+	}
+	// 2) 源码里的 T("…") 字面量 (i18n 包自己的表除外 —— 那些就是 key 本身)
+	for dir, err := os.Getwd(); err == nil; dir = filepath.Dir(dir) {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			root = dir
+			break
+		}
+		if filepath.Dir(dir) == dir {
+			t.Fatal("go.mod not found")
+		}
+	}
+	_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(p, ".go") || strings.HasSuffix(p, "_test.go") {
+			return nil
+		}
+		if strings.HasPrefix(p, "internal/i18n/") {
+			return nil
+		}
+		data, _ := os.ReadFile(p)
+		for _, m := range regexp.MustCompile(`(?:i18n\.)?T\("((?:[^"\\]|\\.)*)"`).FindAllStringSubmatch(string(data), -1) {
+			used[m[1]] = true
+		}
+		return nil
+	})
+	var orphans []string
+	for _, k := range i18n.Keys() {
+		if !used[k] {
+			orphans = append(orphans, k)
+		}
+	}
+	if len(orphans) > 0 {
+		t.Errorf("orphan en entries (stale translations, delete them): %d\n  %s",
+			len(orphans), strings.Join(orphans, "\n  "))
 	}
 }

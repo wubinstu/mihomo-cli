@@ -15,7 +15,7 @@ import (
 )
 
 // tunCmd / dnsCmd 是 config set tun.* / config set dns.* 的极薄糖命令:
-// 不重复实现 list/use/unuse 那套逻辑, 只保留 on/off/list 三个动作。
+// 只保留 on/off/list 三个动作, 其余参数一律走 config set。
 var tunCmd = &cobra.Command{
 	Use:   "tun",
 	Short: T("TUN 透明代理: on/off/list"),
@@ -44,7 +44,7 @@ var tunOffCmd = &cobra.Command{
 
 var dnsCmd = &cobra.Command{
 	Use:   "dns",
-	Short: T("DNS 覆写: on/off/use/unuse/list"),
+	Short: T("DNS 覆写: on/off/list"),
 	Long: T("自定义 DNS 会覆盖订阅中的 dns 配置; off 恢复跟随订阅。") + "\n" +
 		T("裸命令等于 config get dns, 只显示参数表 (预设表见 config set dns.nameserver -h);") + "\n" +
 		T("写操作统一走 config set, 这里只留 on/off 两个糖:") + "\n" +

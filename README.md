@@ -155,6 +155,8 @@ timer.resource-auto-update-interval 24h   24h     24h      ✔
 - `SETTING` 为 `-` 表示**未接管**：不写进内核 yaml，订阅/内核原样保留
 - 只对接管过的键取运行态，所以不会拿订阅/内核的默认值来刷假差异
 - `config set <key> <value>`：写入 config.toml 并立刻让运行态跟上；点号后按 TAB 可继续补全
+- `dns`/`tun` 段默认**不露面**, 只看总开关 (`dns.enable`/`tun.enable`): 开关没开时,
+  这段配置根本不参与渲染, 摆出来只会误导。设了值但没开会给一行提示, `config get dns` 永远能看。
 - **帮助分两级**：`config set -h` 给全部键的一行简介；`config set <key> -h` 给该键的详细介绍
   （说明 / 每个取值的含义 / 默认值 / 生效方式 / 用法）（`proxy-mode`/`log-level` 走 PATCH 热切换；
   端口等需要重建监听的先试热重载，失败才重启；timer 键重写 unit 并启停）

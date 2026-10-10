@@ -60,12 +60,18 @@ var configGetCmd = &cobra.Command{
 			return fmt.Errorf("%s %q (mihomo-cli config get --help)", T("未知配置项"), arg)
 		}
 		sections := []string{"core", "cli", "timer"}
-		for _, sec := range cfg.UsedSections(s) {
+		for _, sec := range cfg.ShownSections(s) {
 			if !contains(sections, sec) {
 				sections = append(sections, sec)
 			}
 		}
 		printConfigSections(s, live, sections)
+		// 设了值但总开关没开的段: 不摆出来, 但要告诉用户"你设过, 只是没启用",
+		// 否则用户会以为没保存 (显式 config get <段> 永远能看)
+		if hidden := cfg.HiddenSections(s); len(hidden) > 0 {
+			fmt.Printf("%s: %s\n", T("已设置但未启用的段"), strings.Join(hidden, ", "))
+			fmt.Printf("  %s\n", T("查看: mihomo-cli config get <段>; 启用: mihomo-cli config set <段>.enable true"))
+		}
 		return nil
 	},
 }
@@ -187,13 +193,32 @@ func configSet(s *app.Settings, key, value string) error {
 		return err
 	}
 	fmt.Printf("%s = %s %s\n", key, canon, T("已保存"))
-	if k.Name == "cli.language" && canon != "auto" {
-		i18n.Set(canon)
+	warnSectionOff(s, k)
+	if k.Name == "cli.language" {
+		// 让当次输出立刻用上新语言 (auto = 回到按 $LANG 判断); 命令树的文案也要重翻
+		i18n.Reset()
+		applyLanguage(rootCmd)
 	}
 	if k.Name == "cli.github-mirror" {
 		_ = render.Generate(s)
 	}
 	return applyConfig(s, k)
+}
+
+// warnSectionOff 设了 dns/tun 的某个键, 但该段总开关没开: 存得下但根本不生效。
+// 段可见性改为"只看 enable"之后 (v1.4.2), 这种设置在 config get 里默认看不见,
+// 所以必须在这里说清楚, 否则用户会以为设了没生效。
+func warnSectionOff(s *app.Settings, k *cfg.Key) {
+	switch k.Section {
+	case "dns", "tun":
+	default:
+		return
+	}
+	if cfg.SectionShown(s, k.Section) {
+		return
+	}
+	fmt.Printf("%s: %s %s\n", T("注意"), k.Section, T("段未启用, 此设置暂不生效"))
+	fmt.Printf("  %s: mihomo-cli config set %s.enable true\n", T("启用"), k.Section)
 }
 
 // badValue L1 校验失败: 拒绝写入, 并把"改哪个键/填什么"说清楚
@@ -699,7 +724,7 @@ func keyExtraDoc(name string) string {
 	}
 	rows := make([][2]string, 0, len(dnsPresets))
 	for _, p := range dnsPresets {
-		rows = append(rows, [2]string{p.Name, p.Desc + "  " + strings.Join(p.IPs, ", ")})
+		rows = append(rows, [2]string{p.Name, i18n.T(p.Desc) + "  " + strings.Join(p.IPs, ", ")})
 	}
 	return T("DNS 预设") + ":\n" + ui.Align2(rows, 2)
 }

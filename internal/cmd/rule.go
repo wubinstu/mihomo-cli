@@ -13,6 +13,7 @@ import (
 
 	"github.com/wubinstu/mihomo-cli/internal/api"
 	"github.com/wubinstu/mihomo-cli/internal/app"
+	"github.com/wubinstu/mihomo-cli/internal/i18n"
 	"github.com/wubinstu/mihomo-cli/internal/render"
 	"github.com/wubinstu/mihomo-cli/internal/subs"
 	"github.com/wubinstu/mihomo-cli/internal/sysd"
@@ -335,7 +336,7 @@ var ruleAddCmd = &cobra.Command{
 		s.UserRules = append(s.UserRules, r)
 		td2 := ruleTypeDoc(addType)
 		fmt.Printf("%s %s %s %s: %s\n",
-			T("该规则选中了所有"), td2.Desc, condText(td2, addCond), T("的流量"), strategyDesc(resolved))
+			T("该规则选中了所有"), i18n.T(td2.Desc), condText(td2, addCond), T("的流量"), strategyDesc(resolved))
 		fmt.Printf("  -> %s\n", r.String())
 		return applyRules(s)
 	},
@@ -362,13 +363,13 @@ func addHelp(cmd *cobra.Command, args []string) {
 		fmt.Println("\n" + T("规则类型") + " (--type):")
 		rows := [][]string{{"TYPE", T("说明"), T("示例")}}
 		for _, rt := range ruleTypes {
-			rows = append(rows, []string{rt.Name, rt.Desc, rt.Example})
+			rows = append(rows, []string{rt.Name, i18n.T(rt.Desc), rt.Example})
 		}
 		ui.Table(os.Stdout, rows, 2)
 		fmt.Println(T("策略") + " (--strategy):")
 		pol := make([][2]string, 0, len(builtinPolicies)+2)
 		for _, p := range builtinPolicies {
-			pol = append(pol, [2]string{p.Name, p.Desc})
+			pol = append(pol, [2]string{p.Name, i18n.T(p.Desc)})
 		}
 		pol = append(pol,
 			[2]string{"PROXY", T("当前 group use 的分组")},
@@ -378,13 +379,13 @@ func addHelp(cmd *cobra.Command, args []string) {
 		fmt.Printf("%s %q\n", T("未知规则类型"), typ)
 	case cond == "":
 		td := ruleTypeDoc(typ)
-		fmt.Printf("\n%s\n  %s: %s\n  %s: %s\n", typ, T("说明"), td.Desc, T("示例"), "--condition \""+td.Example+"\"")
+		fmt.Printf("\n%s\n  %s: %s\n  %s: %s\n", typ, T("说明"), i18n.T(td.Desc), T("示例"), "--condition \""+td.Example+"\"")
 		if td.IPRelated {
 			fmt.Printf("  --no-resolve: %s\n", T("跳过域名解析 (仅 IP 类规则)"))
 		}
 	case strat == "":
 		td := ruleTypeDoc(typ)
-		fmt.Printf("\n%s: %s %q %s\n", T("预览"), td.Desc, cond, T("的流量")+" — "+T("未指定策略 (--strategy)"))
+		fmt.Printf("\n%s: %s %q %s\n", T("预览"), i18n.T(td.Desc), cond, T("的流量")+" — "+T("未指定策略 (--strategy)"))
 	default:
 		s := mustSettings()
 		resolved, err := resolveStrategy(s, strat)
@@ -393,7 +394,7 @@ func addHelp(cmd *cobra.Command, args []string) {
 			return
 		}
 		td := ruleTypeDoc(typ)
-		fmt.Printf("\n%s: %s %s %s: %s\n", T("预览"), td.Desc, condText(td, cond), T("的流量"), strategyDesc(resolved))
+		fmt.Printf("\n%s: %s %s %s: %s\n", T("预览"), i18n.T(td.Desc), condText(td, cond), T("的流量"), strategyDesc(resolved))
 		fmt.Println(T("语法将由内核校验, 非法规则会被拒绝并回滚"))
 		_ = noRes
 	}
@@ -481,7 +482,7 @@ func init() {
 		var out []string
 		for _, rt := range ruleTypes {
 			if strings.HasPrefix(rt.Name, toComplete) {
-				out = append(out, rt.Name+"\t"+rt.Desc)
+				out = append(out, rt.Name+"\t"+i18n.T(rt.Desc))
 			}
 		}
 		return out, cobra.ShellCompDirectiveNoFileComp
@@ -490,7 +491,7 @@ func init() {
 		s := mustSettings()
 		var out []string
 		for _, p := range builtinPolicies {
-			out = append(out, p.Name+"\t"+p.Desc)
+			out = append(out, p.Name+"\t"+i18n.T(p.Desc))
 		}
 		if ps, err := api.New(s).Proxies(); err == nil {
 			var groups []string

@@ -140,7 +140,7 @@ var doctorCmd = &cobra.Command{
 			checkRow{true, T("Res auto-update"),
 				timerText(sysd.ResourceTimerName(), s.ResourceAutoUpdateEnabled, s.ResourceAutoUpdateInterval, s.ResourceLastRun)},
 			checkRow{sysd.TimerEnabled(sysd.SubTimerName()) == s.SubAutoUpdateEnabled, T("Sub auto-update"),
-				timerText(sysd.SubTimerName(), s.SubAutoUpdateEnabled, s.SubAutoUpdateInterval, s.Current().UpdatedAt)},
+				timerText(sysd.SubTimerName(), s.SubAutoUpdateEnabled, s.SubAutoUpdateInterval, s.CurrentUpdatedAt())},
 			checkRow{sysd.TimerEnabled(sysd.NodeTimerName()) == s.NodeAutoSelectEnabled, T("Node auto-select"),
 				timerText(sysd.NodeTimerName(), s.NodeAutoSelectEnabled, s.NodeAutoSelectInterval, s.AutoSelectLastRun)},
 		)
@@ -316,7 +316,7 @@ func lanIP() string {
 
 // ---- version ----
 
-var Version = "1.4.1"
+var Version = "1.4.2"
 
 var versionCmd = &cobra.Command{
 	Use:   "version",
