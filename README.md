@@ -254,9 +254,13 @@ sudo mihomo-cli install --core auto                  # 自动探测风味, 装�
 sudo mihomo-cli install --core v1.19.31              # 指定版本, 风味自动
 sudo mihomo-cli install --core compatible:v1.19.19   # 风味+版本都指定
 mihomo-cli resource core upgrade                     # 沿用记住的平台风味, 装最新
-mihomo-cli resource core rollback                    # 本地版本栈出栈 (离线可用)
+mihomo-cli resource core rollback                    # 本地版本栈出栈 (离线可用, 可反复来回切)
 mihomo-cli resource core history                     # 看版本栈
 ```
+
+版本栈是**往返栈**：换下来的版本连同二进制一起压回栈里，所以 `rollback` 可以来回切，
+不需要重新下载。`history` 的「停用时间」是该版本**上次作为当前内核**的时刻
+（被下一个版本换下来的那一刻），当前内核显示 `-`。
 
 自动探测是**候选链 + 试跑**：按 `plain → v3 → v2 → v1 → compatible → *-go120` 依次下载，
 每个都跑一次 `<bin> -v`，跑不起来（缺指令集/glibc 太低）就自动降级，不靠猜。

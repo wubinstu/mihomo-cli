@@ -101,7 +101,8 @@ var resCoreRollbackCmd = &cobra.Command{
 	Use:   "rollback",
 	Short: T("回滚到上一个装过的版本 (本地版本栈, 不联网)"),
 	Long: T("纯本地行为: 从版本栈出栈一个版本并装回, 不需要网络。") + "\n" +
-		T("新内核把代理链路搞坏时, 网络可能正走在坏掉的内核上, 离线才能可靠回退。"),
+		T("新内核把代理链路搞坏时, 网络可能正走在坏掉的内核上, 离线才能可靠回退。") + "\n" +
+		T("被换下来的当前版本会连同二进制一起压回版本栈, 所以再执行一次 rollback 就回到它。"),
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if os.Geteuid() != 0 {
@@ -127,19 +128,20 @@ var resCoreHistoryCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		h := core.History()
 		cur := core.VersionShort()
-		rows := [][]string{{"#", T("版本"), T("风味"), T("安装时间"), T("位置")}}
+		rows := [][]string{{"#", T("版本"), T("风味"), T("停用时间"), T("位置")}}
 		if cur != "" {
 			rows = append(rows, []string{"*", cur, currentFlavorText(), "-", T("当前")})
 		}
 		for i, v := range h {
 			rows = append(rows, []string{fmt.Sprintf("%d", i+1), v.Version,
-				orFlavor(v.Flavor), v.InstalledAt.Format("2006-01-02 15:04"), T("回滚可用")})
+				orFlavor(v.Flavor), v.StoppedAt.Format("2006-01-02 15:04"), T("回滚可用")})
 		}
 		if len(rows) == 1 {
 			fmt.Println(T("版本栈为空 (至少经历一次升级/切换后才可回滚)"))
 			return nil
 		}
 		ui.Table(os.Stdout, rows, 2)
+		fmt.Println(T("停用时间 = 该版本上次作为当前内核的时间, 即被下一个版本换下来的时刻; 当前内核显示 -"))
 		return nil
 	},
 }

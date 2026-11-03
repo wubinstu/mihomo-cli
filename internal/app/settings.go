@@ -46,10 +46,15 @@ func (r UserRule) String() string {
 
 // CoreVer 一个装过的内核版本 (本地版本栈, rollback 出栈)
 type CoreVer struct {
-	Version     string    `toml:"version"`
-	Flavor      string    `toml:"flavor,omitempty"`   // amd64: v1/v2/v3/compatible 等
-	Platform    string    `toml:"platform,omitempty"` // linux/amd64
-	InstalledAt time.Time `toml:"installed_at"`
+	Version  string `toml:"version"`
+	Flavor   string `toml:"flavor,omitempty"`   // amd64: v1/v2/v3/compatible 等
+	Platform string `toml:"platform,omitempty"` // linux/amd64
+	// StoppedAt 是这个版本「上次作为当前内核」的时刻, 也就是被下一个版本换下来的那一刻,
+	// 不是它的安装时间 —— 安装时间没有可靠来源 (存档是在换下时按那一刻拷的),
+	// 所以 history 表头叫「停用时间」, 数据立刻自洽。
+	// 磁盘字段名故意沿用 installed_at: 改名会让存量 config.toml 多出一个「未知键」,
+	// 而 LoadSettings 对未知键是直接报错的 (1.5.1 起已删掉旧格式迁移)。
+	StoppedAt time.Time `toml:"installed_at"`
 }
 
 // ---- 磁盘上的段 (TOML 表) ----
@@ -330,8 +335,10 @@ func (s *Settings) Save() error {
 	w("test_timeout_ms = %d\n", orInt(s.TestTimeout, 5000))
 
 	if len(s.History) > 0 {
-		w("\n[[core-spec.history]]\n")
+		// 表头必须在循环里: 每个版本是数组的一个元素, 只写一次表头会让第二项起
+		// 变成重复键, config.toml 直接解析失败 (LoadSettings 对坏文件是硬报错)
 		for _, v := range s.History {
+			w("\n[[core-spec.history]]\n")
 			w("version = %s\n", tomlStr(v.Version))
 			if v.Flavor != "" {
 				w("flavor = %s\n", tomlStr(v.Flavor))
@@ -339,7 +346,7 @@ func (s *Settings) Save() error {
 			if v.Platform != "" {
 				w("platform = %s\n", tomlStr(v.Platform))
 			}
-			w("installed_at = %s\n\n", v.InstalledAt.Format("2006-01-02T15:04:05Z07:00"))
+			w("installed_at = %s\n\n", v.StoppedAt.Format("2006-01-02T15:04:05Z07:00"))
 		}
 	}
 

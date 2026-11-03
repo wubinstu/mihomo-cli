@@ -364,7 +364,8 @@ func swapIn(s *app.Settings, tmp, version, flavor, arch string) error {
 	return os.Chmod(app.CoreBin, 0o755)
 }
 
-// pushHistory 把当前已安装的版本推入版本栈, 并把二进制存档到 bin/versions/<ver>/
+// pushHistory 把当前已安装的版本推入版本栈 (记下它被换下来的时刻),
+// 并把二进制存档到 bin/versions/<ver>/mihomo 供离线回滚。
 func pushHistory(s *app.Settings, newVersion, flavor, arch string) error {
 	cur := VersionShort()
 	if cur == "" || cur == newVersion {
@@ -373,38 +374,50 @@ func pushHistory(s *app.Settings, newVersion, flavor, arch string) error {
 	if _, err := os.Stat(app.CoreBin); err != nil {
 		return nil
 	}
-	dir := filepath.Join(app.VersionsDir, cur)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := archiveVersion(cur); err != nil {
 		return err
 	}
-	dst := filepath.Join(dir, "mihomo")
-	if _, err := os.Stat(dst); err != nil {
-		if err := copyFile(app.CoreBin, dst); err != nil {
-			return err
-		}
-		_ = os.Chmod(dst, 0o755)
-	}
-	// 入栈 (栈顶=最近一个)
-	s.History = append([]app.CoreVer{{
-		Version: cur, Flavor: flavorOf(s), Platform: PlatformName(arch), InstalledAt: time.Now(),
-	}}, s.History...)
-	if len(s.History) > MaxHistory {
-		dropped := s.History[MaxHistory:]
-		s.History = s.History[:MaxHistory]
-		for _, d := range dropped {
-			_ = os.RemoveAll(filepath.Join(app.VersionsDir, d.Version))
-		}
-	}
+	pushEntry(s, app.CoreVer{
+		Version: cur, Flavor: flavorOf(s), Platform: PlatformName(arch), StoppedAt: time.Now(),
+	})
 	s.Version = newVersion
 	s.Flavor = flavor
 	s.Platform = PlatformName(arch)
 	return s.Save()
 }
 
+// archiveVersion 把当前内核二进制存档到 bin/versions/<ver>/mihomo (已存在则不覆盖)
+func archiveVersion(ver string) error {
+	dst := filepath.Join(app.VersionsDir, ver, "mihomo")
+	if _, err := os.Stat(dst); err == nil {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	if err := copyFile(app.CoreBin, dst); err != nil {
+		return err
+	}
+	return os.Chmod(dst, 0o755)
+}
+
+// pushEntry 把条目压到版本栈栈顶 (栈顶=最近一个), 超出 MaxHistory 的旧存档一并删除
+func pushEntry(s *app.Settings, e app.CoreVer) {
+	s.History = append([]app.CoreVer{e}, s.History...)
+	if len(s.History) > MaxHistory {
+		for _, d := range s.History[MaxHistory:] {
+			_ = os.RemoveAll(filepath.Join(app.VersionsDir, d.Version))
+		}
+		s.History = s.History[:MaxHistory]
+	}
+}
+
 // flavorOf 已记录的当前风味 (新版本换风味时不能污染旧记录)
 func flavorOf(s *app.Settings) string { return s.Flavor }
 
-// Rollback 出栈: 把上一个装过的版本装回 (纯本地, 不需要网络)
+// Rollback 出栈: 把上一个装过的版本装回 (纯本地, 不需要网络)。
+// 被换下来的当前版本会连同二进制一起压回版本栈, 所以再 rollback 一次就回到它
+// —— 版本栈因此是「最近用过的版本」的往返栈, 而不是单向出栈。
 func Rollback() (string, error) {
 	s, err := app.LoadSettings()
 	if err != nil {
@@ -429,25 +442,30 @@ func Rollback() (string, error) {
 		_ = s.Save()
 		return Rollback()
 	}
-	cur := VersionShort()
-	// 当前版本放回被回滚版本的位置, 栈顶弹出
-	if cur != "" {
-		curDir := filepath.Join(app.VersionsDir, cur)
-		_ = os.MkdirAll(curDir, 0o755)
-		if _, err := os.Stat(app.CoreBin); err == nil {
-			_ = copyFile(app.CoreBin, filepath.Join(curDir, "mihomo"))
-			_ = os.Chmod(filepath.Join(curDir, "mihomo"), 0o755)
+	cur, curFlavor, curPlatform := VersionShort(), s.Flavor, s.Platform
+	// 先弹掉 top (它马上就要装回), 再把当前版本压回去
+	s.History = s.History[1:]
+	if cur != "" && cur != top.Version {
+		if err := archiveVersion(cur); err != nil {
+			return "", err
 		}
+		pushEntry(s, app.CoreVer{
+			Version: cur, Flavor: curFlavor, Platform: curPlatform, StoppedAt: time.Now(),
+		})
 	}
 	_ = os.Remove(app.CoreBin)
 	if err := copyFile(src, app.CoreBin); err != nil {
 		return "", err
 	}
 	_ = os.Chmod(app.CoreBin, 0o755)
-	s.History = s.History[1:]
 	s.Version = top.Version
 	s.Flavor = top.Flavor
-	_ = s.Save()
+	if top.Platform != "" {
+		s.Platform = top.Platform
+	}
+	if err := s.Save(); err != nil {
+		return "", err
+	}
 	return top.Version, nil
 }
 

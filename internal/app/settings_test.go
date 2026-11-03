@@ -24,6 +24,41 @@ func setup(t *testing.T) {
 	LogFile = filepath.Join(LogDir, "mihomo.log")
 }
 
+// 版本栈超过一项时必须还能读回: [[core-spec.history]] 的表头写在了循环外面,
+// 第二项起会变成重复键, config.toml 直接解析失败 —— 而 LoadSettings 对坏文件是
+// 硬报错, 等于第二次升级内核就把整个 CLI 弄坏了。
+func TestMultiEntryHistoryRoundTrip(t *testing.T) {
+	setup(t)
+	s := DefaultSettings()
+	now := time.Now().Add(-time.Hour).Truncate(time.Second)
+	s.History = []CoreVer{
+		{Version: "v1.19.32", Platform: "linux/amd64", StoppedAt: now},
+		{Version: "v1.19.31", Flavor: "v3", Platform: "linux/amd64", StoppedAt: now.Add(-48 * time.Hour)},
+		{Version: "v1.19.30", Platform: "linux/amd64", StoppedAt: now.Add(-96 * time.Hour)},
+	}
+	if err := s.Save(); err != nil {
+		t.Fatal(err)
+	}
+	back, err := LoadSettings()
+	if err != nil {
+		t.Fatalf("config with 3 history entries must still parse: %v", err)
+	}
+	if len(back.History) != 3 {
+		t.Fatalf("len(History) = %d, want 3", len(back.History))
+	}
+	for i, want := range []string{"v1.19.32", "v1.19.31", "v1.19.30"} {
+		if back.History[i].Version != want {
+			t.Errorf("History[%d].Version = %q, want %q", i, back.History[i].Version, want)
+		}
+	}
+	if back.History[1].Flavor != "v3" {
+		t.Errorf("History[1].Flavor = %q, want v3", back.History[1].Flavor)
+	}
+	if !back.History[2].StoppedAt.Equal(now.Add(-96 * time.Hour)) {
+		t.Errorf("History[2].StoppedAt = %v, want %v", back.History[2].StoppedAt, now.Add(-96*time.Hour))
+	}
+}
+
 // 新格式 round-trip: Save 写出来的必须能原样读回
 func TestSettingsRoundTrip(t *testing.T) {
 	setup(t)
@@ -40,7 +75,7 @@ func TestSettingsRoundTrip(t *testing.T) {
 	s.Platform = "linux/amd64"
 	s.Flavor = "v3"
 	s.Version = "v1.19.31"
-	s.History = []CoreVer{{Version: "v1.19.30", Flavor: "v3", Platform: "linux/amd64", InstalledAt: time.Now()}}
+	s.History = []CoreVer{{Version: "v1.19.30", Flavor: "v3", Platform: "linux/amd64", StoppedAt: time.Now()}}
 	s.Overrides = map[string]any{"dns": map[string]any{
 		"nameserver": []any{"https://a/dns-query", "https://b/dns-query"},
 		"enable":     true,
